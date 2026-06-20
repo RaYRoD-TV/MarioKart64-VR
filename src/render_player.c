@@ -1,4 +1,5 @@
 #include <libultraship.h>
+#include <math.h>
 #include <macros.h>
 #include <mk64.h>
 #include <stubs.h>
@@ -13,6 +14,15 @@
 #include "kart_dma.h"
 #include "objects.h"
 #include "render_player.h"
+// VR layer (src/port/vr/vr.cpp, extern "C") - declared here directly to keep this C file free of the VR
+// header. Used by render_kart to hide the local driver's own kart body in First Person VR (mode 1),
+// except while the flip cam has pulled the eye back to show the kart react to a hit.
+extern bool vr_is_active(void);
+extern int  vr_get_view_mode(void);
+extern int  vr_action_cam_active(void);
+extern int  race_mods_infected_carrier(int i); // race_mods.c - the green plague tint
+extern int  race_mods_tag_rainbow(int i);      // race_mods.c - the tag IT kart's star-rainbow flash
+extern float vr_fp_forward_game_units(void);
 #include "code_80057C60.h"
 #include "effects.h"
 #include "buffers.h"
@@ -1105,9 +1115,11 @@ void func_800235AC(Player* player, s8 arg1) {
         }
         return;
     }
-    if ((player->effects & STAR_EFFECT) != 0) {
+    // The tag IT kart rides the same star rainbow with no star flag behind it (the flag would
+    // hand out wreck immunity and off-road speed); its window never closes while the tag sticks.
+    if (((player->effects & STAR_EFFECT) != 0) || race_mods_tag_rainbow(arg1)) {
         temp = (s32) gCourseTimer - gPlayerStarEffectStartTime[arg1];
-        if (temp <= 8) {
+        if (temp <= 8 || race_mods_tag_rainbow(arg1)) {
 
             if (temp >= 7) {
                 D_80164B80[arg1] += 10;
@@ -1133,6 +1145,15 @@ void func_800235AC(Player* player, s8 arg1) {
                 change_player_color_effect_rgb(player, arg1, 0x7000, 0.8f);
                 change_player_color_effect_cmy(player, arg1, 0, 0.8f);
             }
+            return;
+        }
+        // Infected carrier with the conversion flash over: settle into the subtle green plague
+        // tint, the carrier's standing look (race_mods pins the star stamp just past the rainbow
+        // window, so the flash plays once on conversion and this takes over).
+        if (race_mods_infected_carrier(arg1)) {
+            change_player_color_effect_rgb(player, arg1, 0x004800, 0.3f);
+            change_player_color_effect_cmy(player, arg1, 0x400040, 0.3f);
+            D_80164B80[arg1] = 0;
             return;
         }
     }
@@ -1181,6 +1202,8 @@ void render_player_shadow(Player* player, s8 playerId, s8 screenId) {
     f32 spAC;
     UNUSED Vec3f pad2;
     f32 var_f2;
+    f32 fpShadowX = 0.0f; // First Person VR: shadow slides to the eye's distance (see below)
+    f32 fpShadowZ = 0.0f;
 
     // @port: Tag the transform.
     FrameInterpolation_RecordOpenChild("kart_shadow", TAG_ITEM_ADDR((playerId << 8) | (screenId << 4)));
@@ -1189,6 +1212,24 @@ void render_player_shadow(Player* player, s8 playerId, s8 screenId) {
 
     spB0 = -coss(temp_t9 << 7) * 2;
     spAC = -sins(temp_t9 << 7) * 2;
+
+    // VR First Person: the eye rides the camera->kart ray, pushed CAM DISTANCE ahead of the chase
+    // camera - slide the local kart's shadow to the eye's distance along that same ray so your
+    // shadow sits under YOUR seat, not back at the (hidden) kart origin. Zero for other karts,
+    // other view modes, flat play, and the pre-race (the push eases to 0 there).
+    if ((playerId == screenId) && vr_is_active()) {
+        f32 push = vr_fp_forward_game_units();
+        if (push > 0.5f) {
+            f32 dx = player->pos[0] - cameras[screenId].pos[0];
+            f32 dz = player->pos[2] - cameras[screenId].pos[2];
+            f32 len = sqrtf((dx * dx) + (dz * dz));
+            if (len > 1.0f) {
+                f32 t = (push - len) / len; // eye position past the kart, as a fraction of the ray
+                fpShadowX = dx * t;
+                fpShadowZ = dz * t;
+            }
+        }
+    }
 
     if (((player->effects & 0x01000000) == 0x01000000) || ((player->effects & 0x400) == 0x400) ||
         ((player->effects & 0x80000) == 0x80000) || ((player->effects & 0x800000) == 0x800000) ||
@@ -1207,9 +1248,9 @@ void render_player_shadow(Player* player, s8 playerId, s8 screenId) {
         spB4[2] = player->collision.orientationVector[2];
         spB4[1] = player->collision.orientationVector[1];
 
-        spCC[0] = player->pos[0] + ((spB0 * sins(spC0)) + (spAC * coss(spC0)));
+        spCC[0] = player->pos[0] + fpShadowX + ((spB0 * sins(spC0)) + (spAC * coss(spC0)));
         spCC[1] = player->unk_074 + 1.0f;
-        spCC[2] = player->pos[2] + ((spB0 * coss(spC0)) - (spAC * sins(spC0)));
+        spCC[2] = player->pos[2] + fpShadowZ + ((spB0 * coss(spC0)) - (spAC * sins(spC0)));
         set_transform_matrix(mtx, spB4, spCC, (spC0 + player->unk_042),
                              gCharacterSize[player->characterId] * player->size * var_f2);
     } else {
@@ -1217,9 +1258,9 @@ void render_player_shadow(Player* player, s8 playerId, s8 screenId) {
         spC4[1] = spC0;
         spC4[2] = player->unk_206 * 2;
 
-        spCC[0] = player->pos[0] + ((spB0 * sins(spC0)) + (spAC * coss(spC0)));
+        spCC[0] = player->pos[0] + fpShadowX + ((spB0 * sins(spC0)) + (spAC * coss(spC0)));
         spCC[1] = player->unk_074 + 1.0f;
-        spCC[2] = player->pos[2] + ((spB0 * coss(spC0)) - (spAC * sins(spC0)));
+        spCC[2] = player->pos[2] + fpShadowZ + ((spB0 * coss(spC0)) - (spAC * sins(spC0)));
         mtxf_translate_rotate(mtx, spCC, spC4);
         mtxf_scale(mtx, gCharacterSize[player->characterId] * player->size);
     }
@@ -1358,6 +1399,27 @@ void render_kart(Player* player, s8 playerId, s8 screenId, s8 flipOffset) {
     mtxf_translate_rotate(mtx, sp154, sp14C);
     mtxf_scale(mtx, gCharacterSize[player->characterId] * player->size);
     convert_to_fixed_point_matrix(GetKartMatrix(playerId + (screenId * 8)), mtx);
+
+    // VR First Person: hide the local driver's OWN kart/character body so you see out of the cockpit.
+    // playerId == screenId means this kart belongs to the viewer of this screen (the game's own-kart test,
+    // see render_player); other racers are unaffected. We return AFTER the texture DMA + kart matrix above
+    // (so the frame's osRecvMesg DMA wait still completes and held items still attach to the matrix) but
+    // BEFORE emitting any draw commands - the shadow + held weapons are separate and still render.
+    if ((playerId == screenId) && vr_is_active() && (vr_get_view_mode() == 1 /*VR_VIEW_FIRST_PERSON*/) &&
+        !vr_action_cam_active()) {
+        FrameInterpolation_RecordCloseChild(); // balance the RecordOpenChild at the top of render_kart
+        return;
+    }
+
+    // Flatscreen First Person (gFlatViewMode 1): the same own-kart hide, no headset required. The
+    // kart comes back whenever the game takes the camera out of the cockpit - the Lakitu rescue
+    // and the post-finish cinematic both run stock third-person cams (camera.c leaves them alone).
+    if ((playerId == screenId) && !vr_is_active() && (gDemoMode == 0) &&
+        (CVarGetInteger("gFlatViewMode", 0) == 1) && ((player->lakituProps & 0x3) == 0) &&
+        !(player->type & PLAYER_CINEMATIC_MODE)) {
+        FrameInterpolation_RecordCloseChild(); // balance the RecordOpenChild at the top of render_kart
+        return;
+    }
 
     if ((player->effects & BOO_EFFECT) == BOO_EFFECT) {
         if (screenId == playerId) {

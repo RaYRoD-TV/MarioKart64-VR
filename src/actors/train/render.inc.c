@@ -55,7 +55,7 @@ void render_actor_train_engine(Camera* camera, struct TrainCar* actor) {
         gSPDisplayList(gDisplayListHead++, d_course_kalimari_desert_dl_1E910);
         gSPDisplayList(gDisplayListHead++, d_course_kalimari_desert_dl_1E480);
     }
-    if (1440000.0f < distance) {
+    if (CVarGetInteger("gNoCulling", 0) == 0 && 1440000.0f < distance) { // hard wheel-detail cutoff, lifted with no-culling
         return;
     }
 
@@ -205,7 +205,7 @@ void render_actor_train_tender(Camera* camera, struct TrainCar* actor) {
     } else {
         gSPDisplayList(gDisplayListHead++, d_course_kalimari_desert_dl_1FAF8);
     }
-    if (1440000.0f < temp_f0) {
+    if (CVarGetInteger("gNoCulling", 0) == 0 && 1440000.0f < temp_f0) { // hard wheel-detail cutoff, lifted with no-culling
         return;
     }
 
@@ -303,7 +303,7 @@ void render_actor_train_passenger_car(Camera* camera, struct TrainCar* actor) {
         gSPDisplayList(gDisplayListHead++, d_course_kalimari_desert_dl_21C90);
         gSPDisplayList(gDisplayListHead++, d_course_kalimari_desert_dl_21A80);
     }
-    if (1440000.0f < temp_f0) {
+    if (CVarGetInteger("gNoCulling", 0) == 0 && 1440000.0f < temp_f0) { // hard wheel-detail cutoff, lifted with no-culling
         return;
     }
 

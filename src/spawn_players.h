@@ -14,6 +14,7 @@ void spawn_players_gp_one_player(f32*, f32*, f32);
 void spawn_players_versus_one_player(f32*, f32*, f32);
 void spawn_players_gp_two_player(f32* arg0, f32* arg1, f32);
 void spawn_players_versus_two_player(f32*, f32*, f32);
+void spawn_players_1p_battle(f32*, f32*, f32);
 void spawn_players_2p_battle(f32*, f32*, f32);
 void func_8003B318(f32*, f32*, f32);
 void spawn_players_3p_battle(f32*, f32*, f32);

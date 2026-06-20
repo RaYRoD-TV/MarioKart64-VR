@@ -36,6 +36,9 @@ extern "C" {
     #include "update_objects.h"
     #include "course_offsets.h"
     extern const char *d_course_frappe_snowland_dl_list[68];
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
     extern s8 gPlayerCount;
 }
 
@@ -133,7 +136,11 @@ void FrappeSnowland::BeginPlay() {
     spawn_foliage((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_frappe_snowland_tree_spawns));
     spawn_all_item_boxes((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_frappe_snowland_item_box_spawns));
 
-    if (gGamestate != CREDITS_SEQUENCE) {
+    // PROP SWAP: the nineteen snowmen melt away and race_mods spawns the chosen menagerie
+    // along the racing line instead (yes, SNOWMEN swaps them for fresh snowmen - on the line).
+    if (gGamestate != CREDITS_SEQUENCE && race_mods_prop_swap_live()) {
+        race_mods_prop_swap_register(19);
+    } else if (gGamestate != CREDITS_SEQUENCE) {
         SpawnActor<OSnowman>(FVector(697, 0, -1684));
         SpawnActor<OSnowman>(FVector(82, 0, -2245));
         SpawnActor<OSnowman>(FVector(27, 5, -2067));

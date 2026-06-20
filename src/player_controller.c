@@ -18,6 +18,7 @@
 #include "camera.h"
 #include "spawn_players.h"
 #include "code_80057C60.h"
+#include "race_mods.h" // race_mods_infected_carrier - carriers keep their mushrooms
 #include "code_80005FD0.h"
 #include "sounds.h"
 #include "port/Game.h"
@@ -334,7 +335,13 @@ void func_80028864(Player* player, Camera* camera, s8 playerId, s8 screenId) {
                 sp1E = check_player_camera_collision_rubberbanding(player, camera4, (f32) D_8016557C, 0.0f);
                 break;
         }
-        if ((sp1E == 1) || ((player->type & PLAYER_INVISIBLE_OR_BOMB) == PLAYER_INVISIBLE_OR_BOMB) ||
+        // First person / diorama (gFlatViewMode 1/2) move the camera ONTO the kart, so the
+        // rubberbanding "is the kart inside the camera's forward frustum" test fails - the kart
+        // sits at/behind the eye - and hands the human's kart to the CPU, which reads as "first
+        // person locks my controls." The camera is glued to the kart in those modes, so that
+        // failsafe is meaningless there: keep the human driving.
+        if ((sp1E == 1) || (CVarGetInteger("gFlatViewMode", 0) != 0) ||
+            ((player->type & PLAYER_INVISIBLE_OR_BOMB) == PLAYER_INVISIBLE_OR_BOMB) ||
             (gModeSelection == BATTLE) || ((player->lakituProps & HELD_BY_LAKITU) != 0) || (player->lakituProps & LAKITU_SCENE) ||
             //! @todo make a proper match
             ((*(D_801633F8 + (playerId))) == ((s16) 1U))) {
@@ -1231,7 +1238,13 @@ void func_8002B5C0(Player* player, UNUSED s8 playerId, UNUSED s8 screenId) {
     }
     // star
     if ((player->effects & STAR_EFFECT) == STAR_EFFECT) {
-        player->triggers &= ALL_TRIGGERS & ~(HIT_TRIGGERS | SHROOM_TRIGGER | RACING_SPINOUT_TRIGGERS | STATE_TRANSITION_TRIGGERS);
+        if (race_mods_infected_carrier(player - gPlayerOne)) {
+            // An infected carrier's star is permanent - it grants the wreck immunity, but their
+            // mushrooms (and the rest of their items) keep working.
+            player->triggers &= ALL_TRIGGERS & ~(HIT_TRIGGERS | RACING_SPINOUT_TRIGGERS | STATE_TRANSITION_TRIGGERS);
+        } else {
+            player->triggers &= ALL_TRIGGERS & ~(HIT_TRIGGERS | SHROOM_TRIGGER | RACING_SPINOUT_TRIGGERS | STATE_TRANSITION_TRIGGERS);
+        }
     }
     // boo
     if ((player->effects & BOO_EFFECT) == BOO_EFFECT) {
@@ -4419,6 +4432,12 @@ void handle_a_press_for_all_players_during_race(void) {
                 case GRAND_PRIX:
                     handle_a_press_for_player_during_race(gPlayerOne, gControllerOne, 0);
                     return;
+                case BATTLE:
+                    // 1P battle: the human accelerates exactly like a 1P GP racer. Stock battle is
+                    // always multiplayer, so this case never existed - and without it the human's
+                    // A press (the throttle) was dropped, leaving the kart frozen at the line.
+                    handle_a_press_for_player_during_race(gPlayerOne, gControllerOne, 0);
+                    return;
                 case TIME_TRIALS:
                     if (D_8015F890 != 1) {
                         handle_a_press_for_player_during_race(gPlayerOne, gControllerOne, 0);
@@ -4516,7 +4535,8 @@ s16 func_80038534(struct Controller* controller) {
     if (temp_a2 < -0x35) {
         temp_v0 = (temp_v0 * 0x0035) / -temp_a2;
     }
-    return temp_v0;
+    // High speed classes get a precision curve (identity at stock CC) - see race_mods.c.
+    return (s16) race_mods_steering_soften(temp_v0);
 }
 
 s16 func_800388B0(struct Controller* controller) {

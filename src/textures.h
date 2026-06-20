@@ -497,7 +497,7 @@ extern MenuTexture seg2_copyright_1996_texture[2];
 extern MenuTexture seg2_push_start_button_texture[2];
 extern MenuTexture D_02004638[2];
 extern MenuTexture seg2_game_select_texture[2];
-extern MenuTexture seg2_menu_1p_column[4];
+extern MenuTexture seg2_menu_1p_column[6];
 extern MenuTexture seg2_menu_2p_column[5];
 extern MenuTexture seg2_menu_3p_column[4];
 extern MenuTexture seg2_menu_4p_column[4];

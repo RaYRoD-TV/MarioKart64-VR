@@ -24,6 +24,9 @@ OCheepCheep::OCheepCheep(const SpawnParams& params) : OObject(params) {
     Name = "Cheep Cheep";
     ResourceName = "mk:cheep_cheep";
     _behaviour = static_cast<Behaviour>(params.Behaviour.value_or(0));
+    // The base OObject ctor doesn't consume PathSpan, so the activation span passed by Spawn()
+    // silently vanished and ActivationPoints sat at its default. Read it here.
+    ActivationPoints = params.PathSpan.value_or(IPathSpan(160, 170));
 }
 
 void OCheepCheep::SetSpawnParams(SpawnParams& params) {
@@ -39,12 +42,12 @@ void OCheepCheep::Tick() { // update_cheep_cheep
             UNUSED s32 pad;
 
             OCheepCheep::func_8007BD04(0);
-            objectIndex = indexObjectList2[0];
+            objectIndex = indexObjectList2[Slot];
             OCheepCheep::func_8007BBBC(objectIndex);
             object_calculate_new_pos_offset(objectIndex);
             break;
         case Behaviour::PODIUM_CEREMONY:
-            objectIndex = indexObjectList2[0];
+            objectIndex = indexObjectList2[Slot];
             if (D_801658BC == 1) {
                 D_801658BC = 0;
                 init_object(objectIndex, 0);
@@ -61,7 +64,7 @@ void OCheepCheep::Draw(s32 cameraId) { // func_8005217C
     Lights1* D_800E45C0l = (Lights1*) (D_800E45C0);
     Object* object;
     s32 temp_a3;
-    temp_a3 = indexObjectList2[0];
+    temp_a3 = indexObjectList2[Slot];
     object = &gObjectList[temp_a3];
     if (object->state >= 2) {
         if (is_obj_flag_status_active(temp_a3, 0x10) != 0) {
@@ -99,7 +102,12 @@ void OCheepCheep::func_8007BBBC(s32 objectIndex) {
             object->unk_0D5 = 0;
             break;
         case 2:
-            if (gIsMirrorMode != 0) {
+            // The stock 0x5800 yaw is Banshee Boardwalk's lake orientation. A hazard-spawned
+            // school leaps along the yaw the bridge computed (perpendicular to the racing line
+            // at the spawn waypoint - mirror is already baked into the runtime path there).
+            if (HazardLeap) {
+                func_80087E08(objectIndex, 18.0f, 0.7f, 25.0f, LeapYaw, 0x0000012C);
+            } else if (gIsMirrorMode != 0) {
                 func_80087E08(objectIndex, 18.0f, 0.7f, 25.0f, (s16) -0x00005800, 0x0000012C);
             } else {
                 func_80087E08(objectIndex, 18.0f, 0.7f, 25.0f, (s16) 0x00005800, 0x0000012C);
@@ -123,7 +131,7 @@ void OCheepCheep::func_8007BBBC(s32 objectIndex) {
 void OCheepCheep::func_8007BD04(s32 playerId) {
     s32 objectIndex;
 
-    objectIndex = indexObjectList2[0];
+    objectIndex = indexObjectList2[Slot];
     if (gObjectList[objectIndex].state == 0) {
         IPathSpan span = ActivationPoints;
         if (((s32) gNearestPathPointByPlayerId[playerId] >= span.Start) &&

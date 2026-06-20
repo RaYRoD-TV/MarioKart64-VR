@@ -1,3 +1,4 @@
+extern short vr_item_throw_yaw_offset(int isHumanPlayer); // port/vr - head-aimed throws in VR first person
 #include <actors.h>
 #include <main.h>
 #include <code_800029B0.h>
@@ -67,7 +68,7 @@ void update_actor_green_shell(struct ShellActor* shell) {
                         somePosVel[0] = 0.0f;
                         somePosVel[1] = 0.0f;
                         somePosVel[2] = -var_f2;
-                        func_802B64C4(somePosVel, player->rotation[1] + player->unk_0C0);
+                        func_802B64C4(somePosVel, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
                         shell->velocity[0] = somePosVel[0];
                         shell->velocity[1] = somePosVel[1];
                         shell->velocity[2] = somePosVel[2];
@@ -119,7 +120,7 @@ void update_actor_green_shell(struct ShellActor* shell) {
                 somePosVel[0] = 0.0f;
                 somePosVel[1] = 0.0f;
                 somePosVel[2] = var_f2;
-                func_802B64C4(somePosVel, player->rotation[1] + player->unk_0C0);
+                func_802B64C4(somePosVel, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
                 shell->velocity[0] = somePosVel[0];
                 shell->velocity[1] = somePosVel[1];
                 shell->velocity[2] = somePosVel[2];

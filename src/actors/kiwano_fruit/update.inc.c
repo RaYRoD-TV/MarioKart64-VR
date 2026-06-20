@@ -51,11 +51,17 @@ void update_actor_kiwano_fruit(struct KiwanoFruit* fruit) {
                 if ((player->effects & STAR_EFFECT) != 0) {
                     func_800C9060(player - gPlayerOne, SOUND_ARG_LOAD(0x19, 0x00, 0xA0, 0x52));
                 } else {
-                    player->effects |= 0x8000;
-                    player->pos[0] -= temp_f2 * 4.0f;
-                    player->pos[2] -= temp_f14 * 4.0f;
-                    player->velocity[0] -= temp_f2 * 0.7f;
-                    player->velocity[2] -= temp_f14 * 0.7f;
+                    // A VELOCITY-ONLY bonk that knocks the kart around but never spins it out and
+                    // never blows it up: a shove down the approach vector plus a sideways jostle.
+                    // NO position teleport - the old hard pos shove could fling you off a cliff
+                    // edge (which reads as "being blown up off-road"); a velocity nudge lets the
+                    // ground/wall collision keep you on the track. NO spin/tumble trigger and NO
+                    // effect flag (the old 0x8000 UNKNOWN_BATTLE_VAR read as a spinout).
+                    f32 sideX = temp_f14;  // perpendicular to the approach (swap + negate)
+                    f32 sideZ = -temp_f2;
+                    f32 side = (random_int(2) != 0) ? 1.0f : -1.0f; // jostle left or right
+                    player->velocity[0] -= temp_f2 * 1.2f + sideX * side * 0.6f;
+                    player->velocity[2] -= temp_f14 * 1.2f + sideZ * side * 0.6f;
                     func_800C9060(player - gPlayerOne, SOUND_ARG_LOAD(0x19, 0x00, 0x70, 0x18));
                     if (gModeSelection != GRAND_PRIX) {
                         gPostTimeTrialReplayCannotSave = 1;

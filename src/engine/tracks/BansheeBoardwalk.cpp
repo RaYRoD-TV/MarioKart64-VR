@@ -40,6 +40,9 @@ extern "C" {
 #include "collision.h"
 #include "memory.h"
 extern const char *banshee_boardwalk_dls[100];
+// race_mods.c: the PROP SWAP gate (see race_mods.h).
+int race_mods_prop_swap_live(void);
+void race_mods_prop_swap_register(int skippedCount);
 }
 
 BansheeBoardwalk::BansheeBoardwalk() {
@@ -171,9 +174,16 @@ void BansheeBoardwalk::BeginPlay() {
     }
 
     if ((gGamestate != CREDITS_SEQUENCE) && (gModeSelection != TIME_TRIALS)) {
-        SpawnActor<OBat>(FVector(0,0,0), IRotator(0, 0, 90));
-        SpawnActor<OBoos>(5, IPathSpan(180, 190), IPathSpan(200, 210), IPathSpan(280, 290));
-        SpawnActor<OBoos>(5, IPathSpan(490, 500), IPathSpan(510, 520), IPathSpan(620, 630));
+        // PROP SWAP: the bat swarm and both boo packs sit the race out and race_mods spawns
+        // the chosen menagerie along the racing line instead. The cheep ambush and the
+        // munching trash bin above stay - set pieces, not patrolling movers.
+        if (race_mods_prop_swap_live()) {
+            race_mods_prop_swap_register(11);
+        } else {
+            SpawnActor<OBat>(FVector(0,0,0), IRotator(0, 0, 90));
+            SpawnActor<OBoos>(5, IPathSpan(180, 190), IPathSpan(200, 210), IPathSpan(280, 290));
+            SpawnActor<OBoos>(5, IPathSpan(490, 500), IPathSpan(510, 520), IPathSpan(620, 630));
+        }
     }
 
     if (gModeSelection == VERSUS) {

@@ -378,8 +378,8 @@ void PortMenu::AddEnhancements() {
         .PreFunc([](WidgetInfo& info) { info.isHidden = !CVarGetInteger("gNoCulling", 0); })
         .Options(FloatSliderOptions()
                      .Min(0.0f)
-                     .Max(10000.0f)
-                     .DefaultValue(10000.0f)
+                     .Max(100000.0f)
+                     .DefaultValue(100000.0f)
                      .Tooltip("Say how Far the Frustrum are when 'Disable Culling' are enable")
                      .Step(10.0f));
     AddWidget(path, "Enable Custom CC", WIDGET_CVAR_CHECKBOX).CVar("gEnableCustomCC");
@@ -398,9 +398,13 @@ void PortMenu::AddEnhancements() {
         .CVar("gShowSpaghettiVersion")
         .Options(CheckboxOptions().Tooltip("Show the Spaghetti Kart version on the Mario Kart menu").DefaultValue(true));
 
-    AddWidget(path, "Enable Look Behind Camera", WIDGET_CVAR_CHECKBOX)
-        .CVar("gLookBehind")
-        .Options(CheckboxOptions().Tooltip("Press C-Left to look behind you"));
+    // Look behind is native and on by default (hold D-pad Down or Y/Triangle). This checkbox
+    // is the OFF switch for players who want the button back - checking it disables look behind.
+    AddWidget(path, "Disable Look Behind Camera", WIDGET_CVAR_CHECKBOX)
+        .CVar("gNoLookBehind")
+        .Options(CheckboxOptions()
+                     .Tooltip("Look behind (hold D-pad Down or Y/Triangle) is on by default. Check "
+                              "this to turn it off and free the button."));
 
     AddRulesets();
 
@@ -494,6 +498,174 @@ void PortMenu::AddRulesets() {
     AddWidget(path, "Cars", WIDGET_CVAR_SLIDER_INT)
         .CVar("gNumCars")
         .Options(UIWidgets::IntSliderOptions().Min(0).Max(50).Step(1).DefaultValue(7));
+
+    // Flatscreen view modes. The chase-cam override (camera.c func_8001E45C) reads these CVars
+    // every frame, so changes apply live mid-race. VR ignores them - it has its own View Mode.
+    AddSidebarEntry("Enhancements", "Camera", 1);
+    path = { "Enhancements", "Camera", SECTION_COLUMN_1 };
+    static const std::unordered_map<int32_t, const char*> flatViewModeOptions = {
+        { 0, "Third Person" },
+        { 1, "First Person" },
+        { 2, "Diorama" },
+    };
+    AddWidget(path, "Flatscreen View Mode", WIDGET_CVAR_COMBOBOX)
+        .CVar("gFlatViewMode")
+        .Options(UIWidgets::ComboboxOptions()
+                     .ComboMap(flatViewModeOptions)
+                     .DefaultIndex(0)
+                     .Tooltip("How the game is framed when playing WITHOUT a headset. Third Person = the classic "
+                              "chase cam; First Person = ride at the driver's head (your own kart hides); "
+                              "Diorama = a high tabletop view looking down on the action. VR has its own View "
+                              "Mode and ignores this."));
+    AddWidget(path, "First Person Eye Height", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gFlatFPHeight")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gFlatViewMode", 0) != 1); })
+        .Options(UIWidgets::FloatSliderOptions().Min(1.0f).Max(40.0f).Step(0.5f).DefaultValue(8.0f).Format("%.1f")
+                     .Tooltip("How high above the kart the first person eye sits, in game units. Around 8 is "
+                              "driver-head height; raise it for a hood-cam feel."));
+    AddWidget(path, "Diorama Height", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gFlatDioramaHeight")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gFlatViewMode", 0) != 2); })
+        .Options(UIWidgets::FloatSliderOptions().Min(30.0f).Max(900.0f).Step(10.0f).DefaultValue(50.0f).Format("%.0f")
+                     .Tooltip("How high the diorama camera floats above the kart. Higher = more top-down, more "
+                              "tabletop."));
+    AddWidget(path, "Diorama Distance", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gFlatDioramaDist")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gFlatViewMode", 0) != 2); })
+        .Options(UIWidgets::FloatSliderOptions().Min(0.0f).Max(700.0f).Step(10.0f).DefaultValue(190.0f).Format("%.0f")
+                     .Tooltip("How far the diorama camera trails behind the kart. 0 = straight overhead."));
+
+    // VR options. The VR layer reads these CVars every frame, so changes apply live. Shown on the
+    // desktop window; in VR the desktop ImGui is visible on the monitor (e.g. via Virtual Desktop).
+    AddSidebarEntry("Enhancements", "VR", 1);
+    path = { "Enhancements", "VR", SECTION_COLUMN_1 };
+    static const std::unordered_map<int32_t, const char*> vrViewModeOptions = {
+        { 0, "Third Person" },
+        { 1, "First Person" },
+        { 2, "Theater" },
+        { 3, "Diorama" },
+    };
+    AddWidget(path, "View Mode", WIDGET_CVAR_COMBOBOX)
+        .CVar("gVRViewMode")
+        .Options(UIWidgets::ComboboxOptions()
+                     .ComboMap(vrViewModeOptions)
+                     .DefaultIndex(0)
+                     .Tooltip("How the game is shown in VR. Third Person = the classic chase cam in stereo 3D; "
+                              "First Person = ride in the kart; Theater = flat screen floating in front of you "
+                              "(most comfortable); Diorama = the track shrunk to a tabletop you lean around."));
+    AddWidget(path, "First Person Forward (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRFirstPersonFwd")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 1); })
+        .Options(UIWidgets::FloatSliderOptions().Min(-15.0f).Max(15.0f).Step(0.25f).DefaultValue(3.0f).Format("%.2f")
+                     .Tooltip("How far the eye is pushed toward the kart in First Person. It rides the chase "
+                              "cam's slightly downward angle, so large values dive toward the floor - raise it a "
+                              "little at a time. If it moves the wrong way, use a negative value."));
+    AddWidget(path, "First Person World Scale (units/m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRFirstPersonScale")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 1); })
+        .Options(UIWidgets::FloatSliderOptions().Min(5.0f).Max(500.0f).Step(5.0f).DefaultValue(20.0f).Format("%.0f")
+                     .Tooltip("How big the world feels in First Person. Separate from the main World Scale so it "
+                              "won't change Third Person. Lower = larger world."));
+    AddWidget(path, "First Person Eye Height (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRFirstPersonEyeHeight")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 1); })
+        .Options(UIWidgets::FloatSliderOptions().Min(-1.0f).Max(1.0f).Step(0.02f).DefaultValue(0.0f).Format("%.2f")
+                     .Tooltip("Raise or lower the eye in First Person. Separate from the Third Person Eye Height."));
+    AddWidget(path, "Diorama Distance (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRDioramaDist")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 3); })
+        .Options(UIWidgets::FloatSliderOptions().Min(0.1f).Max(3.0f).Step(0.05f).DefaultValue(0.30f).Format("%.2f")
+                     .Tooltip("How far in front of you the tabletop sits (Diorama mode)."));
+    AddWidget(path, "Diorama World Scale (units/m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRDioramaWorldScale")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 3); })
+        .Options(UIWidgets::FloatSliderOptions().Min(20.0f).Max(2000.0f).Step(5.0f).DefaultValue(115.0f).Format("%.0f")
+                     .Tooltip("Size of the tabletop world. This is separate from the main World Scale, so it "
+                              "won't change Third/First Person. Higher = smaller tabletop."));
+    AddWidget(path, "Diorama Height (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRDioramaHeight")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 3); })
+        .Options(UIWidgets::FloatSliderOptions().Min(-1.5f).Max(1.0f).Step(0.05f).DefaultValue(-0.15f).Format("%.2f")
+                     .Tooltip("Raise or lower the tabletop to a comfortable height (Diorama mode)."));
+    AddWidget(path, "World Scale (units/m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRWorldScale")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 0); })
+        .Options(UIWidgets::FloatSliderOptions().Min(5.0f).Max(2000.0f).Step(5.0f).DefaultValue(20.0f).Format("%.0f")
+                     .Tooltip("How big the world feels in Third Person. Smaller value = larger world. "
+                              "First Person and Diorama have their own scale knobs."));
+    AddWidget(path, "Third Person Distance (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRThirdPersonDist")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 0); })
+        .Options(UIWidgets::FloatSliderOptions().Min(-15.0f).Max(50.0f).Step(0.5f).DefaultValue(0.0f).Format("%.1f")
+                     .Tooltip("Move the Third Person camera further behind the kart (and higher) with positive "
+                              "values, or closer with negative. 0 = the game's stock chase distance."));
+    AddWidget(path, "Stereo Depth", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRStereo")
+        .Options(UIWidgets::FloatSliderOptions().Min(0.0f).Max(1.5f).Step(0.05f).DefaultValue(0.5f).Format("%.2f")
+                     .Tooltip("Stereo separation strength. Lower is gentler / less eye strain."));
+    AddWidget(path, "Eye Height (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVREyeHeight")
+        .PreFunc([](WidgetInfo& info) { info.isHidden = (CVarGetInteger("gVRViewMode", 0) != 0); })
+        .Options(UIWidgets::FloatSliderOptions().Min(-1.0f).Max(1.0f).Step(0.02f).DefaultValue(0.16f).Format("%.2f")
+                     .Tooltip("Raise or lower the eye in Third Person. First Person has its own eye height."));
+    AddWidget(path, "HUD Size", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRHudScale")
+        .Options(UIWidgets::FloatSliderOptions().Min(0.2f).Max(1.2f).Step(0.05f).DefaultValue(0.35f).Format("%.2f")
+                     .Tooltip("How much of your view the in-game HUD (item box, positions) fills. Smaller = more central."));
+    AddWidget(path, "HUD Distance (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRHudDist")
+        .Options(UIWidgets::FloatSliderOptions().Min(0.5f).Max(8.0f).Step(0.1f).DefaultValue(2.4f).Format("%.1f"));
+    AddWidget(path, "Menu Distance (m)", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRMenuDist")
+        .Options(UIWidgets::FloatSliderOptions().Min(1.0f).Max(8.0f).Step(0.1f).DefaultValue(3.2f).Format("%.1f"));
+    AddWidget(path, "Menu Size", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRMenuSize")
+        .Options(UIWidgets::FloatSliderOptions().Min(2.0f).Max(12.0f).Step(0.2f).DefaultValue(4.2f).Format("%.1f"));
+    AddWidget(path, "Menu Opacity", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar("gVRMenuOpacity")
+        .Options(UIWidgets::FloatSliderOptions().Min(0.3f).Max(1.0f).Step(0.05f).DefaultValue(0.5f).Format("%.2f")
+                     .Tooltip("How solid the VR menu panel is. 1.0 = opaque; lower lets you see the game "
+                              "through the menu. Won't go fully transparent so the menu stays usable."));
+    AddWidget(path, "Hide HUD (keep item box)", WIDGET_CVAR_CHECKBOX)
+        .CVar("gVRHideHud")
+        .Options(UIWidgets::CheckboxOptions().Tooltip(
+            "Hide the lap counter, race timer, minimap, positions and rankings. The item box stays visible "
+            "so you can still see your held item."));
+    AddWidget(path, "Flip Cam (FP)", WIDGET_CVAR_CHECKBOX)
+        .CVar("gVRFPDrama")
+        .Options(UIWidgets::CheckboxOptions().DefaultValue(true).Tooltip(
+            "Simulate spins, tumbles, bomb launches and lightning strikes from the driver's seat - the "
+            "view rotates with the kart through the whole animation."));
+    AddWidget(path, "Ease Back on Hit (FP)", WIDGET_CVAR_CHECKBOX)
+        .CVar("gVRFlipCam")
+        .Options(UIWidgets::CheckboxOptions().Tooltip(
+            "Pull the camera back to the chase view while your kart takes a hit, catches big air or "
+            "hangs from Lakitu, so you watch it from outside, then ease back in. Takes priority over "
+            "the Flip Cam simulation while active."));
+    AddWidget(path, "Reset VR Settings", WIDGET_BUTTON)
+        .Callback([](WidgetInfo& info) {
+            CVarSetInteger("gVRViewMode", 0);
+            CVarSetFloat("gVRFirstPersonFwd", 3.0f);
+            CVarSetFloat("gVRFirstPersonScale", 20.0f);
+            CVarSetFloat("gVRFirstPersonEyeHeight", 0.0f);
+            CVarSetFloat("gVRThirdPersonDist", 0.0f);
+            CVarSetFloat("gVRDioramaDist", 0.30f);
+            CVarSetFloat("gVRDioramaWorldScale", 115.0f);
+            CVarSetFloat("gVRDioramaHeight", -0.15f);
+            CVarSetFloat("gVRWorldScale", 20.0f);
+            CVarSetFloat("gVRStereo", 0.5f);
+            CVarSetFloat("gVREyeHeight", 0.16f);
+            CVarSetFloat("gVRHudScale", 0.35f);
+            CVarSetFloat("gVRHudDist", 2.4f);
+            CVarSetFloat("gVRMenuDist", 3.2f);
+            CVarSetFloat("gVRMenuSize", 4.2f);
+            CVarSetFloat("gVRMenuOpacity", 1.0f);
+            CVarSetInteger("gVRHideHud", 0);
+            CVarSetInteger("gVRFlipCam", 0);
+            CVarSetInteger("gVRFPDrama", 1);
+            Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
+        })
+        .Options(ButtonOptions().Tooltip("Reset all VR settings on this page to their defaults."));
 }
 
 void PortMenu::AddDevTools() {

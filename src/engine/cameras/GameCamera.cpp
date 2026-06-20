@@ -11,6 +11,11 @@ extern "C" {
 #include "camera.h"
 }
 
+#include <math.h>
+// VR Third Person distance: game units to push the eye back along the horizontal kart->camera direction.
+// 0 outside Third Person VR (so flat play and the other view modes are untouched).
+extern "C" float vr_third_person_push_units(void);
+
 size_t GameCamera::_count = 0;
 
 GameCamera::GameCamera() {
@@ -94,8 +99,20 @@ void GameCamera::SetViewProjection() {
     gSPMatrix(gDisplayListHead++, &PerspectiveMatrix,
               G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
 
-    // Calculate the camera lookAt (camera rotation)
-    guLookAt(&LookAtMatrix, _camera->pos[0], _camera->pos[1], _camera->pos[2], _camera->lookAt[0],
+    // Calculate the camera lookAt (camera rotation). In Third Person VR, push the eye back along the HORIZONTAL
+    // kart->camera direction (keeping height) so the "distance" knob reads as closer/further, not up/down.
+    f32 eyeX = _camera->pos[0], eyeY = _camera->pos[1], eyeZ = _camera->pos[2];
+    f32 pushUnits = vr_third_person_push_units();
+    if (pushUnits != 0.0f) {
+        f32 dx = eyeX - _camera->lookAt[0];
+        f32 dz = eyeZ - _camera->lookAt[2]; // horizontal plane only (ignore Y so height is unchanged)
+        f32 len = sqrtf(dx * dx + dz * dz);
+        if (len > 0.01f) {
+            eyeX += (dx / len) * pushUnits;
+            eyeZ += (dz / len) * pushUnits;
+        }
+    }
+    guLookAt(&LookAtMatrix, eyeX, eyeY, eyeZ, _camera->lookAt[0],
              _camera->lookAt[1], _camera->lookAt[2], _camera->up[0], _camera->up[1], _camera->up[2]);
     gSPMatrix(gDisplayListHead++, &LookAtMatrix,
               G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);

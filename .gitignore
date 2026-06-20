@@ -58,9 +58,9 @@ xml/*
 *.map
 .assets-local.txt
 
-# Torch
+# Torch is vendored in this repo (the build needs it to extract assets from your ROM), so unlike
+# upstream it is NOT ignored here.
 # include/assets/*
-torch/*
 debug/*
 /debug/*
 

@@ -1102,6 +1102,265 @@ void spawn_item_box(Vec3f pos) {
     box->pos[1] = height - 20.0f;
 }
 
+// Nearest live item box to (fromX, fromZ) - the battle rivals seek these to gather weapons instead
+// of ramming racers. Returns 1 and fills out->x/z with the box position when one is up, 0 when the
+// arena has none right now (a respawning box still counts; the rival just arrives as it pops back).
+s32 find_nearest_item_box(f32 fromX, f32 fromZ, f32* outX, f32* outZ) {
+    struct Actor* actor;
+    s32 i;
+    f32 bestD = 1.0e30f;
+    s32 found = 0;
+    for (i = 0; i < (s32) CM_GetActorSize(); i++) {
+        f32 dx, dz, d;
+        actor = CM_GetActor(i);
+        if (actor->flags == 0 || actor->type != ACTOR_ITEM_BOX) {
+            continue;
+        }
+        dx = actor->pos[0] - fromX;
+        dz = actor->pos[2] - fromZ;
+        d = (dx * dx) + (dz * dz);
+        if (d < bestD) {
+            bestD = d;
+            *outX = actor->pos[0];
+            *outZ = actor->pos[2];
+            found = 1;
+        }
+    }
+    return found;
+}
+
+// Treasure hunt: the prize box. Spawns exactly like a normal item box but hands the actor index
+// back, so the renderer can give it the giant look and the minimap can mark it.
+s32 spawn_treasure_item_box(Vec3f pos) {
+    Vec3f startingVelocity = { 0.0f, 0.0f, 0.0f };
+    Vec3s startingRot;
+    struct ItemBox* box;
+    f32 height;
+    s32 id;
+
+    if ((gModeSelection == TIME_TRIALS) || (gPlaceItemBoxes == 0) || (gGamestate == CREDITS_SEQUENCE)) {
+        return -1;
+    }
+    pos[0] *= gTrackDirection;
+    startingRot[0] = random_u16();
+    startingRot[1] = random_u16();
+    startingRot[2] = random_u16();
+    id = add_actor_to_empty_slot(pos, startingRot, startingVelocity, ACTOR_ITEM_BOX);
+    if (id < 0) {
+        return -1;
+    }
+    height = spawn_actor_on_surface(pos[0], pos[1] + 10.0f, pos[2]);
+    box = (struct ItemBox*) CM_GetActor(id);
+    box->resetDistance = height;
+    box->origY = pos[1];
+    box->pos[1] = height - 20.0f;
+    return id;
+}
+
+// Track hazard: a course prop spawned cross-course. This port resolves every actor model through
+// the asset archive by name, so the piranha plant, the rolling yoshi egg and the falling rock all
+// render anywhere - add_actor_to_empty_slot's per-type switch assigns the model and physics flags.
+// Runtime world space; the y is re-grounded against the local terrain.
+void spawn_hazard_prop(s16 actorType, f32 x, f32 y, f32 z) {
+    Vec3f pos;
+    Vec3f startingVelocity = { 0.0f, 0.0f, 0.0f };
+    Vec3s startingRot = { 0, 0, 0 };
+    s32 idx;
+
+    if ((gModeSelection == TIME_TRIALS) || (gGamestate == CREDITS_SEQUENCE)) {
+        return;
+    }
+    pos[0] = x;
+    pos[1] = spawn_actor_on_surface(x, y + 80.0f, z);
+    pos[2] = z;
+    if (actorType == ACTOR_FALLING_ROCK) {
+        pos[1] += 120.0f; // rocks enter from above and respawn at their spawn height
+    }
+    idx = add_actor_to_empty_slot(pos, startingRot, startingVelocity, actorType);
+    if (idx < 0) {
+        return;
+    }
+    if (actorType == ACTOR_PIRANHA_PLANT) {
+        struct PiranhaPlant* plant = (struct PiranhaPlant*) CM_GetActor(idx);
+        plant->visibilityStates[0] = 0;
+        plant->visibilityStates[1] = 0;
+        plant->visibilityStates[2] = 0;
+        plant->visibilityStates[3] = 0;
+        plant->timers[0] = 0;
+        plant->timers[1] = 0;
+        plant->timers[2] = 0;
+        plant->timers[3] = 0;
+    }
+}
+
+// Track hazard: a banana sitting on the ground, identical to one a racer dropped. Position is
+// runtime world space (no gTrackDirection flip - bananas use the dropper convention, not the
+// course-data one). The banana model is a common item asset, so this is safe on every course.
+void spawn_hazard_banana(f32 x, f32 y, f32 z) {
+    Vec3f pos;
+    Vec3f startingVelocity = { 0.0f, 0.0f, 0.0f };
+    Vec3s startingRot = { 0, 0, 0 };
+    struct BananaActor* banana;
+    s32 idx;
+
+    if ((gModeSelection == TIME_TRIALS) || (gGamestate == CREDITS_SEQUENCE)) {
+        return;
+    }
+    pos[0] = x;
+    pos[1] = spawn_actor_on_surface(x, y + 60.0f, z);
+    pos[2] = z;
+    idx = add_actor_to_empty_slot(pos, startingRot, startingVelocity, ACTOR_BANANA);
+    if (idx < 0) {
+        return;
+    }
+    banana = (struct BananaActor*) CM_GetActor(idx);
+    // Hazards belong to nobody. playerId 0 marked the HUMAN as the owner, and the spawn-time
+    // owner-grace flag (0x1000) never clears on this path (only the thrown-banana states count it
+    // down) - so hazard bananas could wipe out every CPU but never the player. Seat 7 plus an
+    // explicit grace clear makes them hit anyone.
+    banana->playerId = 7;
+    banana->flags &= ~0x1000;
+    banana->state = BANANA_ON_GROUND;
+    banana->unk_04 = 0x0014;
+}
+
+// Track hazard: a free green shell already rolling along the given direction - it bounces off
+// walls and wipes out whoever it meets, exactly like a fired one. Runtime world space.
+void spawn_hazard_shell(f32 x, f32 y, f32 z, f32 dirX, f32 dirZ) {
+    Vec3f pos;
+    Vec3f startingVelocity = { 0.0f, 0.0f, 0.0f };
+    Vec3s startingRot = { 0, 0, 0 };
+    struct ShellActor* shell;
+    f32 len;
+    s32 idx;
+
+    if ((gModeSelection == TIME_TRIALS) || (gGamestate == CREDITS_SEQUENCE)) {
+        return;
+    }
+    len = sqrtf(dirX * dirX + dirZ * dirZ);
+    if (len < 0.01f) {
+        return;
+    }
+    pos[0] = x;
+    pos[1] = spawn_actor_on_surface(x, y + 60.0f, z) + 2.0f;
+    pos[2] = z;
+    idx = add_actor_to_empty_slot(pos, startingRot, startingVelocity, ACTOR_GREEN_SHELL);
+    if (idx < 0) {
+        return;
+    }
+    shell = (struct ShellActor*) GET_ACTOR(idx);
+    actor_terrain_collision(&shell->unk30, shell->boundingBoxSize + 1.0f, shell->pos[0], shell->pos[1],
+                            shell->pos[2], pos[0], pos[1], pos[2]);
+    func_802B4E30((struct Actor*) shell);
+    shell->state = MOVING_SHELL;
+    shell->velocity[0] = (dirX / len) * 7.0f;
+    shell->velocity[1] = 0.0f;
+    shell->velocity[2] = (dirZ / len) * 7.0f;
+    shell->rotVelocity = 0;
+    shell->rotAngle = -0x8000;
+    // Hazards belong to nobody. playerId aliases the collision code's owner field, so 0 made the
+    // HUMAN immune - and the thrower's grace flag (0x1000, set for every shell at spawn) only
+    // clears via the throw path's parentIndex countdown, which a hazard never arms. Seat 7 plus
+    // an explicit grace clear lets the shell wipe out anyone, the player included.
+    shell->playerId = 7;
+    shell->flags &= ~0x1000;
+    add_green_shell_in_unexpired_actor_list(idx);
+}
+
+// Track hazard: a kiwano fruit (the DK Jungle pest) ambushes one human racer. Spawned pre-armed -
+// the update positions it relative to its target on its own, so the spawn position is moot. After
+// the first bonk it lurks, re-attacking whenever the target drives on grass (the stock arming).
+void spawn_hazard_kiwano(s32 targetPlayerId) {
+    Vec3f pos = { 0.0f, 0.0f, 0.0f };
+    Vec3f startingVelocity = { 0.0f, 0.0f, 0.0f };
+    Vec3s startingRot = { 0, 0, 0 };
+    struct KiwanoFruit* fruit;
+    s32 idx;
+
+    if ((gModeSelection == TIME_TRIALS) || (gGamestate == CREDITS_SEQUENCE)) {
+        return;
+    }
+    idx = add_actor_to_empty_slot(pos, startingRot, startingVelocity, ACTOR_KIWANO_FRUIT);
+    if (idx < 0) {
+        return;
+    }
+    fruit = (struct KiwanoFruit*) CM_GetActor(idx);
+    fruit->targetPlayer = (s16) targetPlayerId;
+    fruit->state = 1;           // skip the on-grass arming: the ambush starts right away
+    fruit->velocity[0] = 80.0f; // the inbound approach distance the state machine winds down
+}
+
+// Track hazard: a loose red shell that hunts whoever leads the race, following the racing line
+// like a fired one. Runtime world space.
+void spawn_hazard_red_shell(f32 x, f32 y, f32 z, f32 dirX, f32 dirZ) {
+    Vec3f pos;
+    Vec3f startingVelocity = { 0.0f, 0.0f, 0.0f };
+    Vec3s startingRot = { 0, 0, 0 };
+    struct ShellActor* shell;
+    f32 len;
+    s32 idx;
+
+    if ((gModeSelection == TIME_TRIALS) || (gGamestate == CREDITS_SEQUENCE)) {
+        return;
+    }
+    len = sqrtf(dirX * dirX + dirZ * dirZ);
+    if (len < 0.01f) {
+        return;
+    }
+    pos[0] = x;
+    pos[1] = spawn_actor_on_surface(x, y + 60.0f, z) + 2.0f;
+    pos[2] = z;
+    idx = add_actor_to_empty_slot(pos, startingRot, startingVelocity, ACTOR_RED_SHELL);
+    if (idx < 0) {
+        return;
+    }
+    shell = (struct ShellActor*) GET_ACTOR(idx);
+    actor_terrain_collision(&shell->unk30, shell->boundingBoxSize + 1.0f, shell->pos[0], shell->pos[1],
+                            shell->pos[2], pos[0], pos[1], pos[2]);
+    func_802B4E30((struct Actor*) shell);
+    shell->state = RED_SHELL_LOCK_ON;
+    shell->targetPlayer = gPlayerPositionLUT[0]; // first place, re-resolved by the shell if they finish
+    shell->velocity[0] = (dirX / len) * 7.0f;
+    shell->velocity[1] = 0.0f;
+    shell->velocity[2] = (dirZ / len) * 7.0f;
+    shell->rotVelocity = 0;
+    shell->rotAngle = -0x8000;
+    // Same ownerless treatment as the green hazard shell: playerId 0 plus the never-cleared
+    // grace flag made the human untouchable by their own hazards.
+    shell->playerId = 7;
+    shell->flags &= ~0x1000;
+    add_green_shell_in_unexpired_actor_list(idx); // the shared shell-expiry list, reds included
+}
+
+// Item rain: an item box that drops out of the sky ahead of the racer and settles at the normal
+// float height (update_actor_item_box state 6 runs the descent). Position is world space, already
+// direction-corrected by the caller - no gTrackDirection flip here.
+void spawn_falling_item_box(f32 x, f32 y, f32 z) {
+    Vec3f pos;
+    Vec3f startingVelocity;
+    Vec3s startingRot;
+
+    if ((gModeSelection == TIME_TRIALS) || (gPlaceItemBoxes == 0) || (gGamestate == CREDITS_SEQUENCE)) {
+        return;
+    }
+
+    pos[0] = x;
+    pos[1] = y;
+    pos[2] = z;
+    startingRot[0] = random_u16();
+    startingRot[1] = random_u16();
+    startingRot[2] = random_u16();
+    s32 id = add_actor_to_empty_slot(pos, startingRot, startingVelocity, ACTOR_ITEM_BOX);
+    f32 ground = spawn_actor_on_surface(x, y, z);
+
+    struct ItemBox* box = (struct ItemBox*) CM_GetActor(id);
+
+    box->resetDistance = ground;
+    box->origY = ground;
+    box->pos[1] = y;
+    box->state = 6; // falling - settles to origY + 8.66 like a placed box
+}
+
 // Not from decomp
 void spawn_fake_item_box(Vec3f pos) {
     Vec3f startingVelocity;

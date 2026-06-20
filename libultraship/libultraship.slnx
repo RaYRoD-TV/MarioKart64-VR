@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Solution>
+	<Configurations>
+		<BuildType Name="Debug"/>
+		<BuildType Name="Release"/>
+		<BuildType Name="MinSizeRel"/>
+		<BuildType Name="RelWithDebInfo"/>
+		<Platform Name="x64"/>
+	</Configurations>
+	<Project Path="ALL_BUILD.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f87c8335-c4cd-39e3-af98-5bc0eb243d41" DefaultStartup="true">
+		<BuildDependency Project="ImGui.vcxproj"/>
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="src/libultraship.vcxproj"/>
+		<BuildDependency Project="monocypher.vcxproj"/>
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/_deps/prism-build/prism.vcxproj"/>
+		<BuildDependency Project="stb.vcxproj"/>
+	</Project>
+	<Project Path="INSTALL.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7382b5f5-08b1-358f-9489-4d0635091206">
+		<BuildDependency Project="ALL_BUILD.vcxproj"/>
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="ImGui.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8398a53d-2972-3704-8faf-09601d8611d2">
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="PACKAGE.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="03ad95d9-5f75-31ae-b36a-bbddc20b1ce3">
+		<BuildDependency Project="ALL_BUILD.vcxproj"/>
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a8728a4f-6d8e-3995-9d6f-efc0ae4cb825"/>
+	<Project Path="src/libultraship.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="16b14be8-7a1e-3b0b-9694-c5e7ccae4920">
+		<BuildDependency Project="ImGui.vcxproj"/>
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="monocypher.vcxproj"/>
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/_deps/prism-build/prism.vcxproj"/>
+		<BuildDependency Project="stb.vcxproj"/>
+	</Project>
+	<Project Path="monocypher.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8e95edd2-35eb-39c3-a1e6-a68c26096e0e">
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/_deps/prism-build/prism.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f285ec26-04c8-3de6-9f52-9887e4814bee">
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="stb.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4759a66b-dc99-30b7-a59f-90dbf85a78c8">
+		<BuildDependency Project="C:/Users/RaYRoD/Downloads/MarioKart64-VR/SpaghettiKart/build/x64/ZERO_CHECK.vcxproj"/>
+	</Project>
+</Solution>

@@ -1,3 +1,4 @@
+extern short vr_item_throw_yaw_offset(int isHumanPlayer); // port/vr - head-aimed throws in VR first person
 #include <libultraship.h>
 #include <macros.h>
 #include <defines.h>
@@ -442,7 +443,7 @@ void update_actor_triple_shell(TripleShellParent* parent, s16 shellType) {
                         someVelocity[0] = 0;
                         someVelocity[1] = 0;
                         someVelocity[2] = 8;
-                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0);
+                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
                         shell->velocity[0] = someVelocity[0];
                         shell->velocity[1] = someVelocity[1];
                         shell->velocity[2] = someVelocity[2];
@@ -468,7 +469,7 @@ void update_actor_triple_shell(TripleShellParent* parent, s16 shellType) {
                         someVelocity[0] = 0;
                         someVelocity[1] = 0;
                         someVelocity[2] = 8;
-                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0);
+                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
                         shell->velocity[0] = someVelocity[0];
                         shell->velocity[1] = someVelocity[1];
                         shell->velocity[2] = someVelocity[2];
@@ -494,7 +495,7 @@ void update_actor_triple_shell(TripleShellParent* parent, s16 shellType) {
                         someVelocity[0] = 0;
                         someVelocity[1] = 0;
                         someVelocity[2] = 8;
-                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0);
+                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
                         shell->velocity[0] = someVelocity[0];
                         shell->velocity[1] = someVelocity[1];
                         shell->velocity[2] = someVelocity[2];

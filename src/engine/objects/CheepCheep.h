@@ -40,6 +40,13 @@ public:
 
     IPathSpan ActivationPoints; // Path points activation points
 
+    // Track-hazard support (race_mods.c): the stock class hardwired indexObjectList2[0] (one
+    // cheep per course - Banshee's own). A hazard school claims an explicit high slot (11+,
+    // clear of the chomps at 8-10) and leaps along a computed yaw instead of Banshee's 0x5800.
+    s32 Slot = 0;
+    s16 LeapYaw = 0x5800;
+    bool HazardLeap = false;
+
     virtual void SetSpawnParams(SpawnParams& params) override;
     virtual void Tick() override;
     virtual void Draw(s32 cameraId) override;

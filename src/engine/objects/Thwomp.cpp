@@ -35,6 +35,8 @@ extern "C" {
 #include "some_data.h"
 #include "assets/models/common_data.h"
 extern s8 gPlayerCount;
+// race_mods.c: the hazard diag breadcrumb line (racemods_diag.txt).
+void race_mods_diag_line(const char* fmt, ...);
 }
 
 f32 D_800E594C[][2] = {
@@ -108,6 +110,13 @@ void OThwomp::Tick60fps() { // func_80081210
     s32 var_s2_3;
     s32 var_s4;
 
+    if (!_diagTicked && HazardMode) {
+        _diagTicked = true;
+        race_mods_diag_line("thwomp first tick: obj=%d state=%d behaviour=%d ground=%.0f pos=(%.0f %.0f %.0f)",
+                            _objectIndex, gObjectList[_objectIndex].state, (s32) Behaviour, GroundY,
+                            gObjectList[_objectIndex].pos[0], gObjectList[_objectIndex].pos[1],
+                            gObjectList[_objectIndex].pos[2]);
+    }
     func_800722CC(_objectIndex, 0x00000010);
     OThwomp::SetVisibility(_objectIndex);
 
@@ -342,15 +351,21 @@ void OThwomp::func_80074FD8(s32 objectIndex) {
 
 void OThwomp::SetVisibility(s32 objectIndex) { // func_8008A4CC
     s32 loopIndex;
+    s32 inSection;
     Camera* camera;
 
     clear_object_flag(objectIndex, 0x00070000);
     for (loopIndex = 0, camera = camera1; loopIndex < gPlayerCountSelection1; loopIndex++, camera++) {
         if (gObjectList[objectIndex].state != 0) {
-            if ((D_8018CF68[loopIndex] >= (gObjectList[objectIndex].unk_0DF - 1)) &&
-                ((gObjectList[objectIndex].unk_0DF + 1) >= D_8018CF68[loopIndex])) {
+            // unk_0DF holds a Bowser's Castle course-section id (6/8/10 per behaviour); on any
+            // other course the camera's section never matches and the thwomp stays flagless -
+            // no visibility, no crush collision, no slam sound. Hazard spawns skip the band.
+            inSection = HazardMode ||
+                        ((D_8018CF68[loopIndex] >= (gObjectList[objectIndex].unk_0DF - 1)) &&
+                         ((gObjectList[objectIndex].unk_0DF + 1) >= D_8018CF68[loopIndex]));
+            if (inSection) {
                 set_object_flag(objectIndex, 0x00010000);
-                if (D_8018CF68[loopIndex] == gObjectList[objectIndex].unk_0DF) {
+                if (HazardMode || D_8018CF68[loopIndex] == gObjectList[objectIndex].unk_0DF) {
                     set_object_flag(objectIndex, 0x00020000);
                 }
                 if (is_object_visible_on_camera(objectIndex, camera, 0x2AABU) != 0) {
@@ -700,6 +715,13 @@ void OThwomp::Draw(s32 cameraId) {
     Object* object;
 
     camera = &cameras[cameraId];
+    if (!_diagDrawn && HazardMode) {
+        _diagDrawn = true;
+        race_mods_diag_line("thwomp first draw: obj=%d state=%d smashed=%d cam=%d pos=(%.0f %.0f %.0f)", objectIndex,
+                            gObjectList[objectIndex].state, func_80072354(objectIndex, 0x00000040) != 0 ? 0 : 1,
+                            cameraId, gObjectList[objectIndex].pos[0], gObjectList[objectIndex].pos[1],
+                            gObjectList[objectIndex].pos[2]);
+    }
     if (cameraId == PLAYER_ONE || cameraId == 4) { // 4 == freecam
         clear_object_flag(objectIndex, 0x00070000);
         func_800722CC(objectIndex, 0x00000110);
@@ -857,8 +879,8 @@ void OThwomp::func_8007EC30(s32 objectIndex) {
     Object* object;
 
     object = &gObjectList[objectIndex];
-    object->surfaceHeight = 0.0f;
-    object->origin_pos[1] = 0.0f;
+    object->surfaceHeight = HazardMode ? GroundY : 0.0f; // BC floors sit at y=0; hazards probe theirs
+    object->origin_pos[1] = object->surfaceHeight;
     set_obj_origin_offset(objectIndex, 0.0f, 0.0f, 0.0f);
     if (gIsMirrorMode != 0) {
         set_obj_direction_angle(objectIndex, 0U, -_faceDirection, 0U);
@@ -912,8 +934,8 @@ void OThwomp::func_8007EE5C(s32 objectIndex) {
     object->type = 0;
     object->unk_0DF = 6;
     func_80086E70(objectIndex);
-    object->surfaceHeight = 0.0f;
-    object->origin_pos[1] = 0.0f;
+    object->surfaceHeight = HazardMode ? GroundY : 0.0f; // BC floors sit at y=0; hazards probe theirs
+    object->origin_pos[1] = object->surfaceHeight;
     set_obj_origin_offset(objectIndex, 0.0f, 20.0f, 0.0f);
     object->unk_01C[1] = 20.0f;
     if (gIsMirrorMode != 0) {
@@ -963,8 +985,8 @@ void OThwomp::func_8007FA08(s32 objectIndex) {
     object->model = (Gfx*) d_course_bowsers_castle_dl_thwomp;
     set_object_flag(objectIndex, 0x04000220);
     object->type = 0;
-    object->surfaceHeight = 0.0f;
-    object->origin_pos[1] = 0.0f;
+    object->surfaceHeight = HazardMode ? GroundY : 0.0f; // BC floors sit at y=0; hazards probe theirs
+    object->origin_pos[1] = object->surfaceHeight;
     set_obj_origin_offset(objectIndex, 0.0f, 0.0f, 0.0f);
     set_obj_direction_angle(objectIndex, 0U, 0U, 0U);
     if (gIsMirrorMode != 0) {
@@ -1131,8 +1153,8 @@ void OThwomp::func_80080078(s32 objectIndex) { // func_80080078
     object->type = 2;
     object->unk_0DF = 8;
     set_obj_direction_angle(objectIndex, 0U, 0U, 0U);
-    object->surfaceHeight = 0.0f;
-    object->origin_pos[1] = 0.0f;
+    object->surfaceHeight = HazardMode ? GroundY : 0.0f; // BC floors sit at y=0; hazards probe theirs
+    object->origin_pos[1] = object->surfaceHeight;
     set_obj_origin_offset(objectIndex, 0.0f, 0.0f, 0.0f);
     object->unk_01C[1] = 30.0f;
     if (gIsMirrorMode != 0) {
@@ -1204,8 +1226,8 @@ void OThwomp::func_800802C0(s32 objectIndex) {
     object->unk_0DF = 6;
     set_obj_origin_offset(objectIndex, 0.0f, 0.0f, 0.0f);
     set_obj_direction_angle(objectIndex, 0U, 0U, 0U);
-    object->surfaceHeight = 0.0f;
-    object->origin_pos[1] = 0.0f;
+    object->surfaceHeight = HazardMode ? GroundY : 0.0f; // BC floors sit at y=0; hazards probe theirs
+    object->origin_pos[1] = object->surfaceHeight;
     object->offset[1] = 10.0f;
     object->unk_01C[1] = 10.0f;
     if (gIsMirrorMode != 0) {
@@ -1314,8 +1336,10 @@ void OThwomp::func_80080524(s32 objectIndex) {
     object->unk_0DF = 0x0A;
     func_80086E70(objectIndex);
     set_obj_origin_offset(objectIndex, 0.0f, 0.0f, 0.0f);
-    object->surfaceHeight = 70.0f;
-    object->origin_pos[1] = 70.0f;
+    // The stock 70 is the BC sliding corridor's floor height; a hazard slide grounds at the
+    // probed waypoint floor instead.
+    object->surfaceHeight = HazardMode ? GroundY : 70.0f;
+    object->origin_pos[1] = object->surfaceHeight;
     object->unk_01C[1] = 0.0f;
     set_obj_direction_angle(objectIndex, 0U, 0U, 0U);
     if ((gIsMirrorMode != 0) || (gGamestate == CREDITS_SEQUENCE)) {

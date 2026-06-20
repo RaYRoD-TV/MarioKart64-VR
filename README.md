@@ -1,102 +1,128 @@
-![Spaghetti Kart](docs/spaghettigithublight.png#gh-light-mode-only)
-![Spaghetti Kart](docs/spaghettigithubnight.png#gh-dark-mode-only)
+# Mario Kart 64 VR
 
-## Discord
+Play Mario Kart 64 in VR. Built on [SpaghettiKart](https://github.com/HarbourMasters/SpaghettiKart), the Mario Kart 64 PC port. Put on a headset and you're sitting in the kart in stereo 3D with full head tracking. No headset? The same game runs flat on your monitor. Bring your own ROM — no game files are included.
 
-Official Discord: <https://discord.com/invite/shipofharkinian>
+> ⚠️ **Beta — expect bugs.** This is early and still changing. Things may break and not everything is polished yet. Bug reports are welcome.
 
-If you're having any trouble after reading through this `README`, feel free ask for help in the SpaghettiKart Support text channels. Please keep in mind that we do not condone piracy.
+## How to play (no building needed)
 
-# Quick Start
+All you need is Windows and your own Mario Kart 64 ROM:
 
-SpaghettiKart does not include any copyrighted assets.  You are required to provide a supported copy of the game.
+1. Download **`MarioKart64-VR-win64.zip`** from the [latest release](https://github.com/RaYRoD-TV/MarioKart64-VR/releases/latest) and unzip it anywhere.
+2. Start your VR runtime — Virtual Desktop, SteamVR, Quest Link, or Air Link. (Skip this to just play flat on your monitor.)
+3. Run **`Spaghettify.exe`**. The first time only, it asks for your Mario Kart 64 ROM. Pick it once and you're set.
 
-### 1. Verify your ROM dump
+**About the ROM:** it must be the US version in `.z64` format (SHA-1 `579C48E211AE952530FFC8738709F078D5DD215E`). Got an `.n64` dump? Convert it at <https://hack64.net/tools/swapper.php>.
 
-The US ROM is the only supported version. You can verify you have dumped a supported copy of the game by using the SHA-1 File Checksum Online at <https://www.romhacking.net/hash/>. The hash for a US ROM is SHA-1: 579C48E211AE952530FFC8738709F078D5DD215E.
+The game finds your headset on its own and falls back to flat if there isn't one. Force it with `Spaghettify.exe --vr` or `--novr`.
 
-### 2. Verify your ROM is in .z64 format
+## Controls
 
-Your ROM needs to be in .z64 format. If it's in .n64 format, use the following to convert it to a .z64: <https://hack64.net/tools/swapper.php>
+Drive with VR motion controllers, a gamepad, or the keyboard. Your head always controls the view.
 
-### 2. Download SpaghettiKart from [Releases](https://github.com/HarbourMasters/SpaghettiKart/releases)
+**VR motion controllers** (Quest Touch, Index, Reverb G2, WMR, Vive — a gamepad still works alongside them):
 
-### 3. Generating the O2R from the ROM
+| Control | What it does |
+| --- | --- |
+| Left stick | Steer / move through menus |
+| A | Gas (and Select in menus) |
+| B | Brake & reverse (and Back in menus) |
+| Left trigger or X | Use your item |
+| Right trigger or grip | Hop & drift — and, when paused, opens the VR menu |
+| Menu button (left) | Pause |
+| Hold Y | Look behind |
+| Right stick | C buttons; push up to change camera distance |
+| Right stick click | Switch view: Third Person, First Person, Theater, Diorama |
 
-#### Windows
+Your controllers rumble when you take a hit.
 
-* Extract every file from the zip into a folder of your choosing.
-* Run "Spaghettify.exe" and select your US ROM.
+**Gamepad:**
 
-#### Linux
+| Input | What it does |
+| --- | --- |
+| Pause, then R1 | Open / close the in-game menu |
+| D-Pad or stick | Move through menus; left & right change a setting |
+| A | Select |
+| D-Pad Up (while racing) | Switch view: Third Person, First Person, Theater, Diorama |
+| Hold D-Pad Down | Look behind |
+| Z (main menu) | Quit the game (asks first) |
 
-* Extract every file from the zip into a folder of your choosing.
-* Ensure `zenity` or `kdialog` package is installed.
-* Run "spaghetti.appimage" and select your US ROM. You may have to chmod +x the appimage via terminal.
+## The in-game menu
 
-#### Nintendo Switch
+Pause the race, then pull the **right trigger** (or press **R1** on a gamepad) to open the menu. This is where you tune everything live — and in VR it floats right in front of you.
 
-* Run one of the PC releases to generate an `mk64.o2r` file. After launching the game on PC, you will be able to find these files in the same directory as `Spaghettify.exe` or `spaghetti.appimage`.
-* Copy the files to your sd card
+In VR it's **VR OPTIONS**:
 
-### 4. Play
+![VR Options menu](docs/img/vr-options.png)
 
-* Launch `Spaghettify.exe`
-Congratulations, you are now sailing with SpaghettiKart! Have fun!
+- **View Mode** — Third Person, First Person, Theater, or Diorama.
+- **World Scale** — how big the world feels around you.
+- **Cam Distance / Eye Height** — move the camera back/forward and up/down.
+- **Stereo Depth** — strength of the 3D pop.
+- **Menu Opacity / HUD Distance** — how see-through the menu is, and how far away the HUD floats.
+- **Hide HUD** — hide everything except the item box.
+- **HUD Lock** — *World* keeps the HUD parked in the room (the default), *Head* makes it follow your face.
+- **Flip Cam FP / Ease Back FP** — first-person camera tweaks.
+- **Default Settings / Restart Race / Race Setup** — reset everything, restart, or jump to the custom race screen.
 
-# Configuration
+Playing flat on your monitor? The same menu becomes **VIEW OPTIONS** with the flat-screen settings:
 
-### Default controls configuration
+![View Options menu (flat screen)](docs/img/view-options.png)
 
-| N64 | A | B | L | R | Z | Start | Analogue stick | C buttons | D-Pad |
-| - | - | - | - | - | - | - | - | - | - |
-| Keyboard | Shift | Ctrl | Q | Space | Z | Enter | Arrow keys | TGFH (↑ ↓ ← →) | Num 8 2 4 6 |
-| SDL Gamepad | A | X | LB | RB | LT | Start | L-Stick | R-Stick Up, B, Y, R-Stick Right (↑ ↓ ← →) | D-Pad |
+(Prefer desktop sliders? Press **Esc** for the settings menu — the full set is under Enhancements → VR.)
 
-### Other shortcuts
+## Custom races
 
-| Keys | Action |
-| - | - |
-| F11 | Fullscreen |
-| Tab | Toggle Alternate assets |
-| Ctrl+R | Reset |
-| Esc | Settings |
+On the speed-class list (50 / 100 / 150 / Extra) there's one extra option at the bottom: **CUSTOM**. Pick it to open the race setup screen. The normal classes stay 100% stock — custom only changes things when you choose it. Everything here stacks, and the line at the bottom explains whatever you're hovering.
 
-### Graphics Backends
+![Race Setup screen](docs/img/race-setup.png)
 
-Currently, there are three rendering APIs supported: DirectX11 (Windows), OpenGL (all platforms), and Metal (macOS). You can change which API to use in the `Settings` menu of the menubar, which requires a restart.  If you're having an issue with crashing, you can change the API in the `spaghettify.cfg.json` file by finding the line `"Backend":{`... and changing the `id` value to `3` and set the `Name` to `OpenGL`. `DirectX 11` with id `2` is the default on Windows. `Metal` with id `4` is the default on macOS.
+- **Items** — stock, truly random, all one item (you pick which), frantic power items, triples, or inverted (the leader gets the strong stuff). Or turn item boxes off.
+- **CPU items too** — whether the CPUs use the same item mode.
+- **Item rain** — item boxes fall from the sky ahead of the pack.
+- **Hazards** — waves of trouble along the track: bananas, shells, piranha plants, the odd rolling egg, boulders, a rare Lakitu, and trick boxes. Off, level-themed, or wild.
+- **Prop swap** — swaps roadside props for surprises.
+- **Mode** — the big one. Pick how you win:
+  - **Normal** — a regular race.
+  - **Knockout** — last one across the line each lap gets shrunk.
+  - **Balloons** — everyone gets three; hits pop them (see *Balloon out*).
+  - **Tag** — one kart is "it" and rides giant; bump someone to pass it on. Whoever spends the **most** time as "it" **loses**, and it's announced and shown at the finish. CPUs that are "it" will actively chase you down.
+  - **Treasure hunt** — first to the giant prize box wins instantly. It flashes on the minimap. (Laps go unlimited — it runs until someone grabs it.)
+  - **Infected** — one carrier spreads it by touch. Carriers glow green and keep their items. Survivors win by finishing; the infection wins by getting everyone.
+- **Balloon out** (Balloons mode) — what losing your last balloon does: shrink, get eliminated, or just slow down.
+- **Laps** — 1 to 5, or no limit (shown as ∞).
+- **Speed class** — stock, 200, 300, 500cc, or Turbo Laps (+100cc every lap).
+- **Mirror** — flip the track.
+- **Kart size** — tiny, giant, or a random size per kart.
+- **CPU skill / CPU catch-up** — tougher CPUs; turn catch-up off so a real lead sticks.
+- **Start race** — on to character select.
 
-# Modding
+**Track roulette:** press **Z** on the course select to spin a random track. On a Grand Prix cup it shuffles the cup's order instead.
 
-Custom assets are packed in `.o2r` or stored `.zip` files. To use custom assets, place them in the `mods` folder.
+## VS mode (single player)
 
-There is an official [gamebanana page](https://gamebanana.com/games/22970).
+The one-player menu has a **VS** row under Time Trials. Pick your driver, pick a rival, pick a course — then race them one-on-one, side by side, through the rest of that cup.
 
-If you're interested in creating and/or packing your own custom asset `.o2r` files, check out the [documentation page](https://harbourmasters.github.io/SpaghettiKart/).
+## HD textures (optional)
 
-**Note that .otr archives are not supported in SpaghettiKart!**
+Want it in HD? Texture packs load as mods, no rebuild needed. The recommended one is [MK64 Reloaded](https://github.com/GhostlyDark/MK64-Reloaded) by GhostlyDark. Grab the latest `.o2r` from its [releases](https://github.com/GhostlyDark/MK64-Reloaded/releases/latest), make a `mods` folder next to `Spaghettify.exe`, and drop it in.
 
-# Development
+## Building from source
 
-### Building
+Only needed if you want to change the code — players should just grab the release above.
 
-If you want to manually compile SpaghettiKart, please consult the [building instructions](https://github.com/HarbourMasters/SpaghettiKart/blob/main/docs/BUILDING.md).
+You need Windows, Visual Studio 2026, and CMake. The build pulls everything else (including OpenXR) automatically.
 
-### Playtesting (nightly)
+1. Clone this repo.
+2. Run `build_vr.bat`. The first build is slow because it builds the dependencies once; full output goes to `build_vr.log`. (On an older Visual Studio? Open the file and set `GEN` to your version, e.g. `Visual Studio 17 2022`.)
+3. Run `play_vr.bat`, or the exe at `build/x64/Release/Spaghettify.exe`. The same first-launch ROM prompt applies.
 
-If you want to playtest a continuous integration build, you can find them at the links below. Keep in mind that these are for playtesting only, and you will likely encounter bugs and possibly crashes.
+After editing code, `rebuild_vr.bat` does a quick incremental build. VR layer notes are in `VR_README.md`.
 
-* [Windows](https://nightly.link/HarbourMasters/SpaghettiKart/workflows/main/main/spaghetti-windows.zip?status=completed)
-* [Linux](https://nightly.link/HarbourMasters/SpaghettiKart/workflows/main/main/spaghetti-linux-x64.zip?status=completed)
-* [macOS-arm64](https://nightly.link/HarbourMasters/SpaghettiKart/workflows/main/main/spaghetti-mac-arm64.zip?status=completed)
-* [macOS-intel](https://nightly.link/HarbourMasters/SpaghettiKart/workflows/main/main/spaghetti-mac-intel-x64.zip?status=completed)
-* [Switch](https://nightly.link/HarbourMasters/SpaghettiKart/workflows/main/main/Spaghettify-switch.zip?status=completed)
+## Planned
 
-Maintainers: [MegaMech](https://www.github.com/MegaMech), [Coco](https://www.github.com/coco875), [Kirito](https://github.com/KiritoDv)
+- Online netplay (race others over the internet) is planned, not done yet.
 
-<a href="https://github.com/Kenix3/libultraship/">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/poweredbylus.darkmode.png">
-    <img alt="Powered by libultraship" src="./docs/poweredbylus.lightmode.png">
-  </picture>
-</a>
+## Credits
+
+Mario Kart 64 PC port: [SpaghettiKart](https://github.com/HarbourMasters/SpaghettiKart) by HarbourMasters. Engine: [libultraship](https://github.com/Kenix3/libultraship). This fork adds the OpenXR VR layer and the custom race modes.

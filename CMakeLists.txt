@@ -355,6 +355,17 @@ if (UNIX AND NOT APPLE)
 endif()
 
 ################################################################################
+# OpenXR (VR) - Windows only. Binds to libultraship's OpenGL backend via WGL.
+# Statically linked from vcpkg (openxr-loader), so no extra runtime DLLs ship.
+################################################################################
+if (WIN32)
+    find_package(OpenXR CONFIG REQUIRED)
+    find_package(GLEW REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenXR::openxr_loader GLEW::GLEW opengl32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_VR=1 GLEW_STATIC)
+endif()
+
+################################################################################
 # MSVC runtime library
 ################################################################################
 if (MSVC)

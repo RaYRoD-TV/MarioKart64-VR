@@ -126,11 +126,19 @@ public:
     u16 BoundingBoxSize;
     OThwomp::States Behaviour;
     int16_t PrimAlpha;
+    // Track-hazard spawn (race_mods.c): the stock inits assume Bowser's Castle - floors at y=0
+    // and course-section ids 6/8/10 gating visibility, crush collision and the slam SFX. A
+    // hazard thwomp lands on ANY course, so HazardMode grounds the inits at GroundY (the
+    // bridge's probed floor) and SetVisibility skips the section band (frustum cull only).
+    bool HazardMode = false;
+    f32 GroundY = 0.0f;
 private:
     static size_t _count;
     static size_t _rand;
     s32 _idx;
     s16 _faceDirection;
+    bool _diagTicked = false; // one-shot racemods_diag.txt breadcrumbs - spawn/tick/draw chain
+    bool _diagDrawn = false;
     //! @todo Write this better. This effects the squish size and the bounding box size.
     // We should probably return to the programmer the pointer to the actor so they can do thwomp->squishSize = value.
 };

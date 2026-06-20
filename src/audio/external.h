@@ -251,6 +251,7 @@ void fade_channel_volume_scale(u8, u8, u16);
 void func_800C5968(u8);
 void func_800C59C4(void);
 void sound_init(void);
+void audio_stop_all_for_restart(void); // disable all sequence players (kills engine/looping notes) + sound_init
 void func_800C5BD0(void);
 void func_800C5C40(void);
 void func_800C5CB8(void);

@@ -27,6 +27,12 @@
 #include "port/interpolation/FrameInterpolation.h"
 #include "engine/CoreMath.h"
 
+// VR sky-dome active (gVRSkyDome CVar on + dome built) - defined in SkyDomeVR.cpp. In this mode the per-eye
+// pass suppresses every pre-3D rect to kill the background framebuffer-clear that would paint over the dome,
+// which also swallows the thunderbolt lightning flash (a pre-3D fill rect). render_screens defers the flash
+// to post-3D when this is true so it survives on the head-locked HUD plane.
+extern bool vr_sky_dome_active(void);
+
 Vp D_802B8880[] = {
     { { { 640, 480, 511, 0 }, { 640, 480, 511, 0 } } },
 };
@@ -637,7 +643,10 @@ void render_screens(ScreenContext* screen, s32 mode, s32 someId, s32 playerId) {
 
                 if ((CVarGetInteger("gDrawSky", true) == true)) {
                     CM_RaceDrawSky(screen, someId);
-                    func_80093A30(someId); // Fill box for thunderbolt?
+                    // VR dome mode suppresses pre-3D rects; defer the thunderbolt flash to post-3D (see below).
+                    if (!vr_sky_dome_active()) {
+                        func_80093A30(someId); // Fill box for thunderbolt?
+                    }
                 }
             }
             break;
@@ -646,7 +655,10 @@ void render_screens(ScreenContext* screen, s32 mode, s32 someId, s32 playerId) {
 
             if ((CVarGetInteger("gDrawSky", true) == true)) {
                 CM_RaceDrawSky(screen, someId);
-                func_80093A30(someId); // Fill box for thunderbolt?
+                // VR dome mode suppresses pre-3D rects; defer the thunderbolt flash to post-3D (see below).
+                if (!vr_sky_dome_active()) {
+                    func_80093A30(someId); // Fill box for thunderbolt?
+                }
             }
             break;
     }
@@ -727,6 +739,16 @@ void render_screens(ScreenContext* screen, s32 mode, s32 someId, s32 playerId) {
         func_80058C20(mode); // Setup hud matrix
     }
     func_80093A5C(mode); // Perhaps pause render?
+
+    // VR sky-dome mode: the thunderbolt flash was skipped pre-3D above because the per-eye pass suppresses
+    // every pre-3D rect (to kill the background framebuffer-clear that would paint over the dome). Draw it
+    // here instead - after CM_SetViewProjection set mVrSeenPerspective - so it rides the head-locked HUD-plane
+    // rect remap and is visible in front of the world (under the HUD). Flat/non-dome rendering already drew it
+    // pre-3D and skips this. Single call per render_screens either way, so the flash state machine advances
+    // identically.
+    if (vr_sky_dome_active()) {
+        func_80093A30(someId); // Fill box for thunderbolt (deferred from pre-3D in VR dome mode)
+    }
 
     if (CVarGetInteger("gDrawHUD", true) == true) {
         if (D_800DC5B8 != 0) {

@@ -24,6 +24,14 @@
 #include "engine/GameAPI.h"
 #include "port/Game.h"
 
+// port/vr + port menu: the flatscreen view modes (first person / diorama) recompose the chase
+// cam result inside func_8001E45C; VR keeps the stock chase cam and composes its own eye pose.
+// The pause overlay (vr_pause_menu.c) keeps the player cam recomposing while paused so the
+// view-mode rows preview live.
+extern bool vr_is_active(void);
+extern int vr_pause_menu_is_open(void);
+extern float CVarGetFloat(const char* name, float defaultValue);
+
 f32 D_800DDB30[] = { 0.4f, 0.6f, 0.275f, 0.3f };
 
 Camera cameras[NUM_CAMERAS]; // This size should be 5 but there is an overflow somewhere in Bowser's Castle, so we allocate 8 cameras to avoid it.
@@ -830,6 +838,57 @@ void func_8001E0C4(Camera* camera, Player* player, s8 arg2) {
     camera->rot[2] = 0;
 }
 
+// First person / diorama flatscreen view-mode recomposition (gFlatViewMode 1/2), shared by the
+// race camera (func_8001E45C) and the battle camera (func_8001EA0C) so first person works in both.
+// Keeps the chase cam's smoothed FORWARD heading (the lookAt - pos it just computed - identical
+// rotational feel to third person) but re-seats the eye: first person at the driver's head,
+// diorama on a raised trailing tabletop. VR composes its own eye pose; demos and cinematics keep
+// the stock camera. Call AFTER pos/lookAt are set, BEFORE the rot recompute.
+static void apply_flat_view_mode(Camera* camera, Player* player) {
+    s32 viewMode;
+    f32 dirX, dirZ, len;
+    if (vr_is_active() || !(player->type & PLAYER_HUMAN) || gDemoMode != 0 ||
+        (player->type & PLAYER_CINEMATIC_MODE)) {
+        return; // the finish hands the view back to the stock rolling camera - first person lets go
+    }
+    viewMode = CVarGetInteger("gFlatViewMode", 0);
+    if (viewMode != 1 && viewMode != 2) {
+        return; // third person - the chase cam result stands
+    }
+    dirX = camera->lookAt[0] - camera->pos[0];
+    dirZ = camera->lookAt[2] - camera->pos[2];
+    len = sqrtf(dirX * dirX + dirZ * dirZ);
+    if (len > 0.001f) {
+        dirX /= len;
+        dirZ /= len;
+    } else {
+        dirX = 0.0f;
+        dirZ = 1.0f;
+    }
+    if (viewMode == 1) {
+        // First person: eye at the driver's head (render_player hides the own kart body), gaze
+        // level so the horizon stays put on slopes.
+        f32 eyeH = CVarGetFloat("gFlatFPHeight", 8.0f);
+        camera->pos[0] = player->pos[0] + dirX * 4.0f;
+        camera->pos[1] = player->pos[1] + eyeH;
+        camera->pos[2] = player->pos[2] + dirZ * 4.0f;
+        camera->lookAt[0] = camera->pos[0] + dirX * 250.0f;
+        camera->lookAt[1] = camera->pos[1];
+        camera->lookAt[2] = camera->pos[2] + dirZ * 250.0f;
+    } else {
+        // Diorama: a raised tabletop view trailing the kart (the miniature-world framing of the VR
+        // diorama, flat). Defaults are Ray's tuned values.
+        f32 dist = CVarGetFloat("gFlatDioramaDist", 190.0f);
+        f32 height = CVarGetFloat("gFlatDioramaHeight", 50.0f);
+        camera->pos[0] = player->pos[0] - dirX * dist;
+        camera->pos[1] = player->pos[1] + height;
+        camera->pos[2] = player->pos[2] - dirZ * dist;
+        camera->lookAt[0] = player->pos[0] + dirX * 60.0f;
+        camera->lookAt[1] = player->pos[1];
+        camera->lookAt[2] = player->pos[2] + dirZ * 60.0f;
+    }
+}
+
 // This function has a few stack variables.
 void func_8001E45C(Camera* camera, Player* player, s8 arg2) {
     UNUSED s32 pad[6];
@@ -912,6 +971,11 @@ void func_8001E45C(Camera* camera, Player* player, s8 arg2) {
     camera->lookAt[0] = sp64[0];
     camera->lookAt[1] = sp64[1];
     camera->lookAt[2] = sp64[2];
+
+    // Flatscreen first person / diorama recomposition (live-read every frame so the menu applies
+    // instantly), shared with the battle camera. Placed before the rot recompute so camera->rot
+    // stays consistent with the override.
+    apply_flat_view_mode(camera, player);
 
     temp_f12 = camera->lookAt[0] - camera->pos[0];
     sp90 = camera->lookAt[1] - camera->pos[1];
@@ -1036,6 +1100,10 @@ void func_8001EA0C(Camera* camera, Player* player, s8 arg2) {
     camera->lookAt[1] = sp64[1];
     camera->lookAt[2] = sp64[2];
 
+    // First person / diorama also work in battle - the battle chase cam (mode 9) gets the same
+    // eye recomposition the race camera does, so gFlatViewMode applies in the arenas too.
+    apply_flat_view_mode(camera, player);
+
     temp_f12 = camera->lookAt[0] - camera->pos[0];
     sp90 = camera->lookAt[1] - camera->pos[1];
     temp_f14 = camera->lookAt[2] - camera->pos[2];
@@ -1127,6 +1195,13 @@ void func_8001EE98(Player* player, Camera* camera, s8 index) {
                 func_8001EA0C(camera, player, index);
                 break;
         }
+    } else if (camera->mode == 1 && !vr_is_active() && gDemoMode == 0 && vr_pause_menu_is_open() &&
+               ((player->lakituProps & (LAKITU_RETRIEVAL | HELD_BY_LAKITU)) == 0)) {
+        // The flatscreen pause overlay edits gFlatViewMode and the camera knobs live - keep
+        // recomposing the (frozen-world) player camera while it's open, so switching View Mode
+        // or dragging a slider previews INSTANTLY behind the menu instead of waiting for the
+        // unpause. VR skips this: its eyes re-render continuously anyway.
+        func_8001E45C(camera, player, index);
     }
 }
 

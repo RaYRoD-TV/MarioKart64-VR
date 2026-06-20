@@ -38,6 +38,9 @@ extern "C" {
     extern const char *d_course_koopa_troopa_beach_dl_list1[148];
     extern const char *koopa_troopa_beach_dls2[148];
     extern s8 gPlayerCount;
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 KoopaTroopaBeach::KoopaTroopaBeach() {
@@ -145,7 +148,11 @@ void KoopaTroopaBeach::BeginPlay() {
     spawn_all_item_boxes((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_koopa_troopa_beach_item_box_spawns));
     spawn_palm_trees((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_koopa_troopa_beach_tree_spawn));
 
-    if (gGamestate != CREDITS_SEQUENCE) {
+    // PROP SWAP: the crabs dig in and race_mods spawns the chosen menagerie along the racing
+    // line instead. The seagulls stay - aerial ambience, not obstacles.
+    if (gGamestate != CREDITS_SEQUENCE && race_mods_prop_swap_live()) {
+        race_mods_prop_swap_register(10);
+    } else if (gGamestate != CREDITS_SEQUENCE) {
         SpawnActor<OCrab>(FVector2D(-1809, 625), FVector2D(-1666, 594));
         SpawnActor<OCrab>(FVector2D(-1852, 757), FVector2D(-1620, 740));
         SpawnActor<OCrab>(FVector2D(-1478, 1842), FVector2D(-1453, 1833));

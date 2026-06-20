@@ -26,21 +26,25 @@ public:
     virtual void Tick() {};
     ScreenContext* mScreen;
 protected:
-    f32 mScale;
-    u16 mCloudVariant;
-    u8* mTexture;
-    s32 mTextureWidth;
-    s32 mTextureHeight;
-    bool mVisible;
-    Vtx* mVtx;
-    int32_t mX;
-    int32_t mY;
-    int32_t mRotY;
-    int32_t mOldX;
-    int32_t mOldY;
+    // Every member defaults to a safe value: subclasses fill these from their Tick state machines,
+    // but the renderer can call Draw before the first Tick runs (the VR path renders several frames
+    // during race setup). Uninitialized values here crashed Frappe Snowland - a garbage
+    // mTextureWidth divided by zero inside gDPLoadBlock, a garbage mTexture access-violated.
+    f32 mScale = 1.0f;
+    u16 mCloudVariant = 0;
+    u8* mTexture = nullptr;
+    s32 mTextureWidth = 0;
+    s32 mTextureHeight = 0;
+    bool mVisible = false;
+    Vtx* mVtx = nullptr;
+    int32_t mX = 0;
+    int32_t mY = 0;
+    int32_t mRotY = 0;
+    int32_t mOldX = 0;
+    int32_t mOldY = 0;
 
-    s16 mUnk208;
-    s16 mUnk210;
-    f32 mUnk1E8;
-    s16 mUnk218;
+    s16 mUnk208 = 0;
+    s16 mUnk210 = 0;
+    f32 mUnk1E8 = 0.0f;
+    s16 mUnk218 = 0;
 };

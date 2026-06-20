@@ -193,7 +193,7 @@ enum ControllerPakScrollDirectionTypes {
 
 #define NUM_ROWS_GAME_MODE_MENU 4
 #define NUM_COLUMN_GAME_MODE_SUB_MENU 4
-#define NUM_ROWS_GAME_MODE_SUB_MENU 3
+#define NUM_ROWS_GAME_MODE_SUB_MENU 4 // 1P gained a fourth mode column (BATTLE) - it has no sub rows, but the [column] index must be in bounds
 
 // This really, really shouldn't be in this header file, but I don't know where else to put it
 void rmonPrintf(const char*, ...);
@@ -270,11 +270,16 @@ extern u32 sVIGammaOffDitherOn;
 extern const s8 sScreenModePlayerTable[5];
 extern const s8 sScreenModePlayerCount[5];
 extern const s8 gPlayerModeSelection[];
-extern const s8 sGameModePlayerColumnDefault[][3];
-extern const s8 sGameModePlayerColumnExtra[][3];
-extern const s32 gGameModePlayerSelection[][3];
+extern const s8 sGameModePlayerColumnDefault[][4];
+extern const s8 sGameModePlayerColumnExtra[][4];
+extern const s32 gGameModePlayerSelection[][4];
 extern const s8 sCharacterGridOrder[8];
 extern const s16 gCupCourseOrder[NUM_CUPS][NUM_COURSES_PER_CUP];
+// Port additions: track roulette. cup_course_at resolves a cup slot through the GP shuffle (Z on
+// the cup list), so the course display, the commit and the post-race advance all play the same
+// order; roulette_reset_shuffle clears it whenever a fresh course select begins.
+s16 cup_course_at(s32 cup, s32 idx);
+void roulette_reset_shuffle(void);
 
 extern const union GameModePack sSoundMenuPack;
 

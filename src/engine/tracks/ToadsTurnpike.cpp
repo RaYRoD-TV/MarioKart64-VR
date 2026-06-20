@@ -40,6 +40,10 @@ extern "C" {
     extern const char *d_course_toads_turnpike_dl_list[81];
     extern s16 currentScreenSection;
     extern s8 gPlayerCount;
+    // race_mods.c: the PROP SWAP gate - nonzero means the signature movers stand down and the
+    // replacement menagerie spawns along the racing line at staging (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 ToadsTurnpike::ToadsTurnpike() {
@@ -166,6 +170,13 @@ void ToadsTurnpike::BeginPlay() {
             _numBuses = 8;
             _numTankerTrucks = 8;
             _numCars = 8;
+        }
+
+        // PROP SWAP: the highway shuts down - every truck, bus, tanker and car stands down and
+        // race_mods replaces them with the chosen menagerie (chomps prowling the turnpike).
+        if (race_mods_prop_swap_live()) {
+            race_mods_prop_swap_register((int) (_numTrucks + _numBuses + _numTankerTrucks + _numCars));
+            _numTrucks = _numBuses = _numTankerTrucks = _numCars = 0;
         }
 
         for (size_t i = 0; i < _numTrucks; i++) {

@@ -34,6 +34,9 @@ extern "C" {
     #include "memory.h"
     extern const char *sherbet_land_dls[72];
     extern const char *sherbet_land_dls_2[72];
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 SherbetLand::SherbetLand() {
@@ -133,6 +136,11 @@ void SherbetLand::Load() {
 }
 
 f32 SherbetLand::GetWaterLevel(FVector pos, Collision* collision) {
+    // No collision context (mid-race spawned actors): the flat lake level is the right answer
+    // anyway. Never dereference a NULL here - see the DK Jungle boulder crash.
+    if (collision == NULL) {
+        return Props.WaterLevel;
+    }
     if ((get_surface_type(collision->meshIndexZX) & 0xFF) == SNOW) {
         return (f32) (gTrackMinY - 0xA);
     }
@@ -141,6 +149,13 @@ f32 SherbetLand::GetWaterLevel(FVector pos, Collision* collision) {
 
 void SherbetLand::BeginPlay() {
     spawn_all_item_boxes((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_sherbet_land_item_box_spawns));
+
+    // PROP SWAP: the colony waddles off and race_mods spawns the chosen menagerie along the
+    // racing line instead (PENGUINS just redeploys them onto the driving line). The stock
+    // VERSUS bomb karts below are mode furniture, not course movers - they stay either way.
+    if (race_mods_prop_swap_live()) {
+        race_mods_prop_swap_register(13);
+    } else {
 
     // Multiplayer does not spawn the big penguin... It does now!
 //  if (gPlayerCountSelection1 == 1) {
@@ -170,6 +185,8 @@ void SherbetLand::BeginPlay() {
     SpawnActor<OPenguin>(FVector(-2500.0f, 0.0f, -250.0f), 0x4000, 0x8000, 0.0f, OPenguin::PenguinType::CHICK, OPenguin::Behaviour::SLIDE6);
     SpawnActor<OPenguin>(FVector(-535.0f, 0.0f, 875.0f), 0x8000, -0x4000, 0.0f, OPenguin::PenguinType::CHICK, OPenguin::Behaviour::SLIDE6);
     SpawnActor<OPenguin>(FVector(-250.0f, 0.0f, 953.0f), 0x9000, -0x4000, 0.0f, OPenguin::PenguinType::CHICK, OPenguin::Behaviour::SLIDE6);
+
+    } // end of the PROP SWAP stand-down
 
     if (gGamestate != CREDITS_SEQUENCE) {
         if (gModeSelection == VERSUS) {

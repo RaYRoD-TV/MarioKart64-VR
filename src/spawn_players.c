@@ -28,6 +28,7 @@
 #include "effects.h"
 #include "decode.h"
 #include "port/Game.h"
+#include "race_mods.h"
 
 f32 D_80165210[8];
 f32 D_80165230[8];
@@ -516,6 +517,8 @@ UNUSED s16 D_800E43A4 = 1;
 UNUSED s16 D_800E43A8 = 0;
 
 void spawn_players_gp_one_player(f32* arg0, f32* arg1, f32 arg2) {
+    s32 duelRival;
+
     func_80039DA4();
     if (((GetCupCursorPosition() == TRACK_ONE) && (D_8016556E == 0)) || (gDemoMode == 1) ||
         (gDebugMenuSelection == DEBUG_MENU_OPTION_SELECTED)) {
@@ -540,6 +543,11 @@ void spawn_players_gp_one_player(f32* arg0, f32* arg1, f32 arg2) {
             }
         }
     }
+
+    // Port addition: a duel cuts the field to two at spawn time (race_mods.c). The grid remap goes
+    // first so the pair starts on the front row; the filter runs right after the karts exist.
+    duelRival = race_mods_duel_spawn_prepare();
+    race_mods_duel_grid_remap(duelRival, D_80165270);
 
     D_8016556E = 0;
     if (gDemoMode == 1) {
@@ -578,6 +586,7 @@ void spawn_players_gp_one_player(f32* arg0, f32* arg1, f32 arg2) {
                         chooseCPUPlayers[5], PLAYER_EXISTS | PLAYER_STAGING | PLAYER_START_SEQUENCE | PLAYER_CPU);
         spawn_player(gPlayerEight, 7, arg0[D_80165270[6]], arg1[D_80165270[7]] + 250.0f, arg2, 32768.0f,
                         chooseCPUPlayers[6], PLAYER_EXISTS | PLAYER_STAGING | PLAYER_START_SEQUENCE | PLAYER_CPU);
+        race_mods_duel_spawn_filter(duelRival);
         D_80164A28 = 1;
     }
     func_80039AE4();
@@ -726,6 +735,58 @@ void spawn_players_versus_two_player(f32* arg0, f32* arg1, f32 arg2) {
     } else {
         spawn_player(gPlayerTwo, 1, arg0[1], arg1[1], arg2, 32768.0f, gCharacterSelections[1],
                      PLAYER_EXISTS | PLAYER_START_SEQUENCE | PLAYER_HUMAN);
+    }
+    D_80164A28 = 0;
+    func_80039AE4();
+}
+
+// 1P battle: the human plus up to three CPU rivals (the setup screen's RIVALS row) on the four
+// stock battle pads. Rivals draw random characters the human didn't pick, so every battle has a
+// fresh field. They drive by line of sight (update_player's battle branch) and fight through
+// race_mods' aimed shells - the arenas have no waypoint paths for the stock CPU kit.
+void spawn_players_1p_battle(f32* arg0, f32* arg1, f32 arg2) {
+    Player* const seats[8] = { gPlayerOne, gPlayerTwo,   gPlayerThree, gPlayerFour,
+                               gPlayerFive, gPlayerSix,  gPlayerSeven, gPlayerEight };
+    f32 rotations[4];
+    s8 taken[8] = { 0 };
+    s32 rivals = CVarGetInteger("gBattleRivals", 3);
+    s32 i;
+
+    if (rivals < 1) {
+        rivals = 1;
+    }
+    if (rivals > 3) {
+        rivals = 3;
+    }
+    // The stock pad facings: Big Donut karts face along the ring, the box arenas face center.
+    if (IsBigDonut()) {
+        rotations[0] = -16384.0f;
+        rotations[1] = 16384.0f;
+        rotations[2] = 0.0f;
+        rotations[3] = 32768.0f;
+    } else {
+        rotations[0] = 32768.0f;
+        rotations[1] = 0.0f;
+        rotations[2] = -16384.0f;
+        rotations[3] = 16384.0f;
+    }
+
+    spawn_player(gPlayerOne, 0, arg0[0], arg1[0], arg2, rotations[0], gCharacterSelections[0],
+                 PLAYER_EXISTS | PLAYER_START_SEQUENCE | PLAYER_HUMAN);
+    taken[gCharacterSelections[0] & 7] = 1;
+    for (i = 1; i <= rivals; i++) {
+        s32 pick = random_int(7);
+        while (taken[pick & 7]) {
+            pick = (pick + 1) & 7; // walk to the next free character so rivals stay distinct
+        }
+        taken[pick & 7] = 1;
+        spawn_player(seats[i], i, arg0[i], arg1[i], arg2, rotations[i], pick,
+                     PLAYER_EXISTS | PLAYER_START_SEQUENCE | PLAYER_CPU);
+    }
+    for (i = rivals + 1; i < 8; i++) {
+        // Stock filler karts - present in the player array, never in the match.
+        spawn_player(seats[i], i, arg0[i & 3], arg1[i & 3], arg2, 32768.0f, i,
+                     PLAYER_START_SEQUENCE | PLAYER_CPU);
     }
     D_80164A28 = 0;
     func_80039AE4();
@@ -894,6 +955,8 @@ void spawn_and_set_player_spawns(void) {
     s16 sp5A = 0;
     s32 temp;
 
+    race_mods_duel_spawn_reset(); // each spawn pass re-decides whether the duel filter applies
+
     if ((!IsPodiumCeremony()) && (gModeSelection != BATTLE)) {
         sp5E = (f32) gTrackPaths[0][0].x;
         sp5C = (f32) gTrackPaths[0][0].z;
@@ -1000,6 +1063,19 @@ void spawn_and_set_player_spawns(void) {
         }
     } else if (IsBlockFort()) {
         switch (gActiveScreenMode) {
+            case SCREEN_MODE_1P: // 1P battle - the four stock pads, rivals filled in
+                temp = 5;
+                D_80165210[0] = 0.0f;
+                D_80165210[1] = 0.0f;
+                D_80165210[2] = -200.0f;
+                D_80165210[3] = 200.0f;
+                D_80165230[0] = 200.0f;
+                D_80165230[1] = -200.0f;
+                D_80165230[2] = 0.0f;
+                D_80165230[3] = 0.0f;
+                spawn_players_1p_battle(D_80165210, D_80165230, temp);
+                break;
+
             case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
             case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
                 temp = 5;
@@ -1030,6 +1106,19 @@ void spawn_and_set_player_spawns(void) {
         }
     } else if (IsSkyscraper()) {
         switch (gActiveScreenMode) {
+            case SCREEN_MODE_1P: // 1P battle
+                temp = 0x1E0;
+                D_80165210[0] = 0.0f;
+                D_80165210[1] = 0.0f;
+                D_80165210[2] = -400.0f;
+                D_80165210[3] = 400.0f;
+                D_80165230[0] = 400.0f;
+                D_80165230[1] = -400.0f;
+                D_80165230[2] = 0.0f;
+                D_80165230[3] = 0.0f;
+                spawn_players_1p_battle(D_80165210, D_80165230, temp);
+                break;
+
             case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
             case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
                 temp = 0x1E0;
@@ -1060,6 +1149,19 @@ void spawn_and_set_player_spawns(void) {
         }
     } else if (IsDoubleDeck()) {
         switch (gActiveScreenMode) {
+            case SCREEN_MODE_1P: // 1P battle
+                temp = 0x37;
+                D_80165210[0] = 0.0f;
+                D_80165210[1] = 0.0f;
+                D_80165210[2] = -160.0f;
+                D_80165210[3] = 160.0f;
+                D_80165230[0] = 160.0f;
+                D_80165230[1] = -160.0f;
+                D_80165230[2] = 0.0f;
+                D_80165230[3] = 0.0f;
+                spawn_players_1p_battle(D_80165210, D_80165230, temp);
+                break;
+
             case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
             case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
                 temp = 0x37;
@@ -1090,6 +1192,19 @@ void spawn_and_set_player_spawns(void) {
         }
     } else if (IsBigDonut()) {
         switch (gActiveScreenMode) {
+            case SCREEN_MODE_1P: // 1P battle
+                temp = 0xC8;
+                D_80165210[0] = 0.0f;
+                D_80165210[1] = 0.0f;
+                D_80165210[2] = -575.0f;
+                D_80165210[3] = 575.0f;
+                D_80165230[0] = 575.0f;
+                D_80165230[1] = -575.0f;
+                D_80165230[2] = 0.0f;
+                D_80165230[3] = 0.0f;
+                spawn_players_1p_battle(D_80165210, D_80165230, temp);
+                break;
+
             case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
             case SCREEN_MODE_2P_SPLITSCREEN_VERTICAL:
                 temp = 0xC8;

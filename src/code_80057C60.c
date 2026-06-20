@@ -12,6 +12,8 @@
 #include "camera.h"
 #include "code_80057C60.h"
 #include "main.h"
+#include "race_mods.h"
+#include "race_mods_menu.h" // race_mods_draw_status_hud - the infected-mode HUD line
 #include "actors.h"
 #include "code_800029B0.h"
 #include "racing/memory.h"
@@ -650,6 +652,12 @@ void func_80058C20(u32 arg0) {
 }
 
 void render_hud(u32 arg0) {
+    extern int vr_pause_menu_is_open(void);
+    if (vr_pause_menu_is_open()) { // VR: hide ALL race HUD (lap/time/position/item/etc.) while our overlay is open
+        return;
+    }
+    // HIDE HUD (gVRHideHud) intentionally does NOT early-return here: the per-element checks below keep
+    // the item box drawn while hiding everything else (timer/lap/speedo/minimap/banner/place).
 
     D_8018D21C = arg0;
     gSPDisplayList(gDisplayListHead++, D_0D0076F8);
@@ -731,9 +739,15 @@ void func_80058F78(void) {
         set_matrix_hud_screen();
         if ((!gDemoMode) && (gIsHUDVisible != 0) && (D_801657D8 == 0)) {
             draw_item_window(PLAYER_ONE);
-            if (gHUDModes != 2) {
-                render_hud_timer(PLAYER_ONE);
-                draw_simplified_lap_count(PLAYER_ONE);
+            // gVRHideHud: hide everything but the item box in VR (timer/lap/speedo here; minimap/banner/
+            // positions in func_800591B4). The item box above is always kept.
+            if ((gHUDModes != 2) && (CVarGetInteger("gVRHideHud", 0) == 0)) {
+                // Battle has no laps and no race clock - the lap counter and timer hide there
+                // (the balloon count rows in race_mods_draw_status_hud cover battle instead).
+                if (gModeSelection != BATTLE) {
+                    render_hud_timer(PLAYER_ONE);
+                    draw_simplified_lap_count(PLAYER_ONE);
+                }
                 func_8004EB38(0);
                 if (D_801657E6 != false) {
                     if (CVarGetInteger("gEnableDigitalSpeedometer", false) == true) {
@@ -817,13 +831,14 @@ void func_800591B4(void) {
                 if (D_801657F0 != false) {
                     func_800514BC();
                 }
-                if ((!gDemoMode) && (D_801657E8 != false)) {
+                if ((!gDemoMode) && (D_801657E8 != false) && (CVarGetInteger("gVRHideHud", 0) == 0)) {
                     if (D_80165800[0] != 0) {
                         func_8004EE54(0);
                         if (gModeSelection != BATTLE) {
                             set_minimap_finishline_position(0);
                         }
                         func_8004F3E4(0);
+                        draw_treasure_minimap_marker(0); // treasure hunt's flashing prize marker
                     }
                     if ((gScreenModeSelection == SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL) && (D_80165800[1] != 0)) {
                         func_8004EE54(1);
@@ -831,13 +846,24 @@ void func_800591B4(void) {
                             set_minimap_finishline_position(1);
                         }
                         func_8004F3E4(1);
+                        draw_treasure_minimap_marker(1);
                     }
                 }
             }
-            if ((gHUDModes != 2) && (gModeSelection == GRAND_PRIX) && (D_8018D2BC != 0)) {
+            // The one-winner modes (balloon elimination, infected) have no meaningful places -
+            // the rank portrait ladder and the big position number hide for them. Infected gets
+            // its own square ladder instead: seat order, sides not places - who is infected.
+            if ((gHUDModes != 2) && (gModeSelection == GRAND_PRIX) && (D_8018D2BC != 0)
+                && (CVarGetInteger("gVRHideHud", 0) == 0) && !race_mods_hide_place_hud()) {
                 func_80050320();
+            } else if ((gHUDModes != 2) && (CVarGetInteger("gVRHideHud", 0) == 0) &&
+                       race_mods_infected_active()) {
+                race_mods_draw_infected_ladder();
             }
-            func_800590D4();
+            if (CVarGetInteger("gVRHideHud", 0) == 0 && !race_mods_hide_place_hud()) {
+                func_800590D4();
+            }
+            race_mods_draw_status_hud(); // infected: the carrier warning + the winner banner
         }
         func_8005902C();
         func_80057DD0();
@@ -851,7 +877,7 @@ void func_80059358(void) {
 void render_hud_2p_horizontal_player_two_horizontal_player_one(void) {
     if (gHUDDisable == 0) {
         render_hud_timer(PLAYER_ONE);
-        if (playerHUD[PLAYER_ONE].lapCount != 3) {
+        if (playerHUD[PLAYER_ONE].lapCount != race_mods_total_laps()) {
             draw_hud_2d_texture_32x8(playerHUD[PLAYER_ONE].lapX, playerHUD[PLAYER_ONE].lapY,
                                      (u8*) common_texture_hud_lap); // draw the lap word
             draw_lap_count(playerHUD[PLAYER_ONE].lapX + 0xC, playerHUD[PLAYER_ONE].lapY - 4,
@@ -867,7 +893,7 @@ void func_800593F0(void) {
 void render_hud_2p_horizontal_player_two(void) {
     if (gHUDDisable == 0) {
         render_hud_timer(PLAYER_TWO);
-        if (playerHUD[PLAYER_TWO].lapCount != 3) {
+        if (playerHUD[PLAYER_TWO].lapCount != race_mods_total_laps()) {
             draw_hud_2d_texture_32x8(playerHUD[PLAYER_TWO].lapX, playerHUD[PLAYER_TWO].lapY,
                                      (u8*) common_texture_hud_lap);
             draw_lap_count(playerHUD[PLAYER_TWO].lapX + 0xC, playerHUD[PLAYER_TWO].lapY - 4,
@@ -1273,7 +1299,7 @@ void func_8005A14C(s32 playerId) {
         } else {
             gObjectList[objectIndex].primAlpha = 0x00FF;
         }
-        if (lapCount >= 3) {
+        if (lapCount >= race_mods_total_laps()) {
             gObjectList[objectIndex].direction_angle[2] = 0;
             gObjectList[objectIndex].direction_angle[1] = 0;
             gObjectList[objectIndex].direction_angle[0] = 0;
@@ -2290,19 +2316,22 @@ void func_8005CB60(s32 playerId, s32 lapCount) {
     if (playerHUD[playerId].lapCount < D_8018D320) {
         playerHUD[playerId].someTimer = (u32) (s32) (gCourseTimer * 100.0f);
         if (*huh < lapCount) {
+            // The lap-time arrays only hold 3 entries; with a lap override past 3 the later laps
+            // reuse the last slot (the results screen shows three lap rows either way).
+            s32 lapSlot = (*huh > 2) ? 2 : *huh;
             temp_a0_2 = gTimePlayerLastTouchedFinishLine[playerId] * 100.0f;
             playerHUD[playerId].timeLastTouchedFinishLine = temp_a0_2;
-            playerHUD[playerId].lapCompletionTimes[*huh] = temp_a0_2;
-            if (*huh == 0) {
-                playerHUD[playerId].lapDurations[*huh] = playerHUD[playerId].timeLastTouchedFinishLine;
+            playerHUD[playerId].lapCompletionTimes[lapSlot] = temp_a0_2;
+            if (lapSlot == 0) {
+                playerHUD[playerId].lapDurations[lapSlot] = playerHUD[playerId].timeLastTouchedFinishLine;
             } else {
-                playerHUD[playerId].lapDurations[*huh] =
-                    playerHUD[playerId].lapCompletionTimes[*huh] - playerHUD[playerId].lapCompletionTimes[*huh - 1];
+                playerHUD[playerId].lapDurations[lapSlot] = playerHUD[playerId].lapCompletionTimes[lapSlot] -
+                                                            playerHUD[playerId].lapCompletionTimes[lapSlot - 1];
             }
-            playerHUD[playerId].someTimer1 = playerHUD[playerId].lapDurations[*huh];
+            playerHUD[playerId].someTimer1 = playerHUD[playerId].lapDurations[lapSlot];
             playerHUD[playerId].blinkTimer = 0x003C;
-            if (lapCount == 3) {
-                playerHUD[playerId].someTimer = playerHUD[playerId].lapCompletionTimes[*huh];
+            if (lapCount == race_mods_total_laps()) {
+                playerHUD[playerId].someTimer = playerHUD[playerId].lapCompletionTimes[lapSlot];
             }
             if (gModeSelection == (s32) 1) {
                 if (D_80165638 >= playerHUD[playerId].someTimer1) {
@@ -2314,7 +2343,7 @@ void func_8005CB60(s32 playerId, s32 lapCount) {
                     D_80165658[lapCount - 1] = 1;
                     D_801657E3 = 1;
                 }
-                if ((lapCount == 3) && ((u32) playerHUD[playerId].someTimer < (u32) D_80165648)) {
+                if ((lapCount == race_mods_total_laps()) && ((u32) playerHUD[playerId].someTimer < (u32) D_80165648)) {
                     D_801657E5 = 1;
                 }
             }
@@ -2324,20 +2353,24 @@ void func_8005CB60(s32 playerId, s32 lapCount) {
             }
             *huhthedeuce += 1;
             if (1) {}
-            switch (*huhthedeuce) { /* switch 1; irregular */
-                case 0:             /* switch 1 */
-                    break;
-                case 1:                                   /* switch 1 */
+            // Crossing-count milestones, relative to the race's lap total (stock hardcoded 1/2/3):
+            // first crossing announces lap 2, total-1 announces the final lap, total completes the race.
+            // Middle crossings of a long race announce nothing, same as stock's silent case 0.
+            if (*huhthedeuce != race_mods_total_laps()) {
+                if (*huhthedeuce == race_mods_total_laps() - 1) {
+                    CM_ActivateFinalLapLakitu(playerId); // func_800790B4(playerId);
+                } else if (*huhthedeuce == 1) {
                     CM_ActivateSecondLapLakitu(playerId); // func_80079084(playerId);
                     func_800C9060(playerId, SOUND_ARG_LOAD(0x19, 0x00, 0xF0, 0x15));
                     if ((IsLuigiRaceway()) && (D_80165898 == 0) && (gModeSelection != (s32) TIME_TRIALS)) {
                         D_80165898 = 1;
                     }
-                    break;
-                case 2:                                  /* switch 1 */
-                    CM_ActivateFinalLapLakitu(playerId); // func_800790B4(playerId);
-                    break;
-                case 3: /* switch 1 */
+                } else {
+                    // Middle crossings of a long race: Lakitu's sign art only exists for "2" and
+                    // FINAL LAP, so acknowledge the lap with the crossing jingle instead.
+                    func_800C9060(playerId, SOUND_ARG_LOAD(0x19, 0x00, 0xF0, 0x15));
+                }
+            } else {
                     if ((D_8018D114 == 0) || (D_8018D114 == 1)) {
                         gHUDModes = 0;
                         D_801657E6 = 0;
@@ -2366,7 +2399,6 @@ void func_8005CB60(s32 playerId, s32 lapCount) {
                             D_8018D1CC = 0x00000064;
                         }
                     }
-                    break;
             }
         }
     } else {
@@ -5785,13 +5817,17 @@ void render_battle_balloon(Player* player, s8 arg1, s16 arg2, s8 arg3) {
         // wut?
         xdiff = (var_f20 = player->pos[0] - cameras[arg3].pos[0]);
         zdiff = player->pos[2] - cameras[arg3].pos[2];
+        // Other karts' balloons scale UP with distance so they stay visible (a split-screen
+        // visibility hack). Full-screen 1P battle views the whole arena, so the rivals are far and
+        // hit the old 1.8x cap, reading as comically huge. Gentler divisor + a 0.9x cap keeps them
+        // looking like balloons on karts, not blimps, while still staying visible at range.
         if (gActiveScreenMode != 3) {
-            var_f20 = sqrtf((xdiff * xdiff) + (zdiff * zdiff)) / 300.0f;
+            var_f20 = sqrtf((xdiff * xdiff) + (zdiff * zdiff)) / 450.0f;
         } else {
-            var_f20 = sqrtf((xdiff * xdiff) + (zdiff * zdiff)) / 200.0f;
+            var_f20 = sqrtf((xdiff * xdiff) + (zdiff * zdiff)) / 250.0f;
         }
-        if (var_f20 >= 1.8) {
-            var_f20 = 1.8f;
+        if (var_f20 >= 0.9) {
+            var_f20 = 0.9f;
         }
         if (var_f20 <= 0.3) {
             var_f20 = 0.3f;
@@ -5862,7 +5898,9 @@ void pop_player_balloon(Player* player, s8 playerIndex) {
         gPlayerBalloonStatus[playerIndex][gPlayerBalloonCount[playerIndex]] |= 2;
         gPlayerBalloonCount[playerIndex]--;
         func_800C9060(playerIndex, SOUND_ARG_LOAD(0x19, 0x00, 0x90, 0x51));
-        if (gPlayerBalloonCount[playerIndex] < 0) {
+        if (gPlayerBalloonCount[playerIndex] < 0 && gModeSelection == BATTLE) {
+            // Losing the last balloon turns a battler into the invisible bomb kart - battle only.
+            // The BALLOONS race mode (race_mods.c) hands out the knockout squash instead.
             func_8008FD4C(player, playerIndex);
         }
     }
@@ -6453,7 +6491,8 @@ void func_8006D474(Player* player, s8 playerId, s8 screenId) {
             FrameInterpolation_RecordCloseChild();
         }
     }
-    if ((gModeSelection == BATTLE) && (player->unk_002 & (UNK_002_UNKNOWN_0x2 << (screenId * 4)))) {
+    if ((gModeSelection == BATTLE || race_mods_balloons_active()) &&
+        (player->unk_002 & (UNK_002_UNKNOWN_0x2 << (screenId * 4)))) {
         func_8006BA94(player, playerId, screenId);
     }
 }
@@ -6630,7 +6669,7 @@ void func_8006E420(Player* player, s8 arg1, s8 arg2) {
             func_8006C6AC(player, temp_s0, arg1, arg2);
         }
 
-        if (gModeSelection == BATTLE) {
+        if (gModeSelection == BATTLE || race_mods_balloons_active()) {
             func_8006B9CC(player, arg1);
         }
     }

@@ -10,6 +10,7 @@
 #include "waypoints.h"
 #include "replays.h"
 #include "main.h"
+#include "race_mods.h"
 #include "code_800029B0.h"
 #include "code_80057C60.h"
 #include "update_objects.h"
@@ -32,6 +33,10 @@
 
 extern s16 gPlayerBalloonCount[];
 extern s16 D_8016348C;
+
+// The 1P VERSUS duel rides the GRAND_PRIX flow with this CVar set (the VS course commit writes
+// it) - the cup-tour transitions below must not treat a duel as cup progress.
+extern int CVarGetInteger(const char* name, int defaultValue);
 
 extern s32 gLapCountByPlayerId[];
 extern u16 D_802BA048;
@@ -117,9 +122,17 @@ void update_player_battle_status(void) {
     }
     if (aliveCounter == 1) {
         gPlayerWinningIndex = (s32) playersAlive[0];
+        // 1P battle holds the match open briefly so the WIN banner is unmissable; returns 0 once
+        // the grace is up (and always 0 for multiplayer battle, which ends as before).
+        if (race_mods_battle_hold_winner(gPlayerWinningIndex)) {
+            return;
+        }
         func_8028E028();
     } else if (aliveCounter == 0) {
         gPlayerWinningIndex = (s32) playersDead[0];
+        if (race_mods_battle_hold_winner(gPlayerWinningIndex)) {
+            return;
+        }
         func_8028E028();
     }
 }
@@ -136,7 +149,10 @@ void func_8028E298(void) {
         }
         temp_a2 = gPathIndexByPlayerId[i];
 
-        temp_v0 = ((2 - gPlayers[i].lapCount) * gPathCountByPathIndex[temp_a2]);
+        // Estimated time-to-finish ranking key for still-racing players. The lap term is laps
+        // REMAINING after this one - stock hardcoded 2 (= 3 laps - 1), which with a lap override
+        // let mid-race karts outrank players who had already finished (a 2nd place showed 8th).
+        temp_v0 = (((race_mods_total_laps() - 1) - gPlayers[i].lapCount) * gPathCountByPathIndex[temp_a2]);
         temp_v0 += gPathCountByPathIndex[temp_a2] * (1.0f - gLapCompletionPercentByPlayerId[i]);
         temp_v0 /= 15.0f;
 
@@ -148,6 +164,14 @@ void func_8028E298(void) {
 
 void set_next_course(void) {
 
+    // A 1P VERSUS duel is one race, not a cup tour: no podium ceremony, no next cup course.
+    // It hands back to the course select (the pause menu's COURSE CHANGE transition), so the
+    // next duel is a couple of presses away - the ceremony is a pure-Grand-Prix reward.
+    if (CVarGetInteger("gVersusDuel", 0) != 0) {
+        gGotoMode = COURSE_SELECT_MENU_FROM_QUIT;
+        gTourComplete = false;
+        return;
+    }
     if (D_80150120) {
         if (GetCupCursorPosition() == GetCupSize() - 1) { // CUP_COURSE_FOUR) {
             gGotoMode = ENDING;
@@ -493,13 +517,15 @@ void func_8028EF28(void) {
             gPlayers[i].lapCount++;
 
             if ((gPlayers[i].type & PLAYER_HUMAN) != 0) {
-                if (gPlayers[i].lapCount == 3) {
+                if (gPlayers[i].lapCount == race_mods_total_laps()) {
                     func_8028EEF0(i);
 
                     currentPosition = gPlayers[i].currentRank;
                     gPlayers[i].type |= PLAYER_CPU;
 
-                    if (currentPosition < 4) {
+                    // Infected races always continue to the next course: the result is the team
+                    // verdict, not a placement, so a "bad" finish must never game-over the GP.
+                    if (currentPosition < 4 || race_mods_infected_active()) {
                         D_80150120 = 1;
                     }
 
@@ -574,7 +600,7 @@ void func_8028EF28(void) {
                         }
                     }
 
-                } else if (gPlayers[i].lapCount == 2) {
+                } else if (gPlayers[i].lapCount == race_mods_total_laps() - 1) {
                     if ((gPlayers[i].type & PLAYER_INVISIBLE_OR_BOMB) != 0) {
                         return;
                     }
@@ -583,7 +609,7 @@ void func_8028EF28(void) {
                         func_800CA49C((u8) i);
                     }
                 }
-            } else if (gPlayers[i].lapCount == 3) {
+            } else if (gPlayers[i].lapCount == race_mods_total_laps()) {
                 func_8028EEF0(i);
                 if (gModeSelection == TIME_TRIALS) {
                     func_80005AE8(player);
@@ -1088,6 +1114,13 @@ void func_802903B0(void) {
     if(HMAS_IsPlaying(HMAS_MUSIC)) {
         HMAS_Stop(HMAS_MUSIC);
     }
+    // Also silence the PREVIOUS race's engine + looping SFX on restart. The kart engine is a live NOTE in a
+    // sequence player (not HMAS), and sound_init() only clears the request queue - so we must disable the
+    // sequence players to clear their active notes. audio_stop_all_for_restart() does that + sound_init().
+    // Stop the HMAS SFX/ENV channels too. setup_race re-inits the audio for the restarted race.
+    HMAS_Stop(HMAS_SFX);
+    HMAS_Stop(HMAS_ENV);
+    audio_stop_all_for_restart();
 }
 
 void func_802903D8(Player* playerOne, Player* playerTwo) {

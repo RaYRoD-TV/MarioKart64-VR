@@ -135,6 +135,24 @@ void DKJungle::Load() {
 }
 
 f32 DKJungle::GetWaterLevel(FVector pos, Collision* collision) {
+    // A caller with no collision context (mid-race spawned actors) gets the position-only
+    // banding - the same logic the 0xFF section branch uses, minus the cave check. Never
+    // dereference a NULL here: the hazard boulder hard-crashed the race doing exactly that.
+    if (collision == NULL) {
+        if (pos.x > -478.0f) {
+            return -33.9f;
+        }
+        if (pos.x < -838.0f) {
+            return -475.0f;
+        }
+        if (pos.z > -436.0f) {
+            return -475.0f;
+        }
+        if (pos.z < -993.0f) {
+            return -33.9f;
+        }
+        return (pos.z < pos.x) ? -475.0f : -33.9f;
+    }
     int32_t temp_v1 = get_track_section_id(collision->meshIndexZX) & 0xFF;
 
     if (temp_v1 == 0xFF) {

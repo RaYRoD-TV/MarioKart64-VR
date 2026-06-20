@@ -10,6 +10,7 @@
 
 #include "profiler.h"
 #include "main.h"
+#include "race_mods.h"
 #include "racing/memory.h"
 #include "menus.h"
 #include <segments.h>
@@ -40,6 +41,7 @@
 #include "port/Game.h"
 #include "port/Engine.h"
 #include "engine/Matrix.h"
+#include "port/vr/vr.h"
 
 // Declarations (not in this file)
 void func_80091B78(void);
@@ -341,12 +343,87 @@ void init_controllers(void) {
     }
 }
 
+// VR motion controllers (OpenXR) as the first pad. Merged into gControllerPads[0] AHEAD of the
+// edge detection below, so every consumer - race input, the stock menus, the race setup screen,
+// the VR pause overlay - sees them exactly like a physical pad, fresh-press edges included. The
+// layout is fixed and kart-shaped:
+//   left stick           steer (and menu navigation)     right stick   C buttons (up = camera zoom)
+//   A                    accelerate (menu select)        B             brake (menu back)
+//   left trigger / X     fire your item (Z)
+//   right trigger / either grip   hop and drift (R; with the race paused, R also opens the VR menu)
+//   menu button          pause (Start)                   Y (hold)      look behind
+//   right stick click    cycle the VR view mode
+static void vr_merge_pad0(void) {
+    unsigned vr = vr_controller_buttons();
+    float ls[2];
+    float rs[2];
+    float m;
+    u16 b = 0;
+    s8 vx, vy;
+
+    if (!vr_controllers_active()) {
+        return;
+    }
+    if (vr & VR_BTN_A) { b |= A_BUTTON; }
+    if (vr & VR_BTN_B) { b |= B_BUTTON; }
+    if (vr & (VR_BTN_LTRIGGER | VR_BTN_X | VR_BTN_LSTICK)) {
+        b |= Z_TRIG; // fire your item
+    }
+    if (vr & (VR_BTN_RTRIGGER | VR_BTN_RGRIP)) {
+        b |= R_TRIG; // hop / drift - squeezing the RIGHT grip holds the kart sideways
+    }
+    if (vr & VR_BTN_MENU)   { b |= START_BUTTON; }
+    if (vr & (VR_BTN_Y | VR_BTN_LGRIP)) { // held = look behind (the look-behind reads .button) -
+        b |= D_JPAD;                      // the LEFT grip is the rear-view squeeze (moved off
+    }                                     // drift, which lives on the right hand)
+    if (vr & VR_BTN_RSTICK) { b |= U_JPAD; } // view-mode cycle's shortcut
+
+    vr_controller_stick(0, ls);
+    vr_controller_stick(1, rs);
+
+    // Right stick = the C buttons (C-up is the camera zoom cycle, matching right-stick-up on pads).
+    if (rs[1] >  0.5f) { b |= U_CBUTTONS; }
+    if (rs[1] < -0.5f) { b |= D_CBUTTONS; }
+    if (rs[0] < -0.5f) { b |= L_CBUTTONS; }
+    if (rs[0] >  0.5f) { b |= R_CBUTTONS; }
+    gControllerPads[0].button |= b;
+
+    // Left stick steers. Radial deadzone, rescaled so full deflection still reaches full lock;
+    // OpenXR's +y-up convention matches the N64 stick, no flip. Per axis the stronger source wins,
+    // so a gamepad on the desk stays usable alongside the motion controllers.
+    m = sqrtf(ls[0] * ls[0] + ls[1] * ls[1]);
+    if (m > 0.12f) {
+        f32 g;
+        if (m > 1.0f) {
+            ls[0] /= m;
+            ls[1] /= m;
+            m = 1.0f;
+        }
+        g = (m - 0.12f) / (1.0f - 0.12f) * 80.0f / m;
+        vx = (s8) (ls[0] * g);
+        vy = (s8) (ls[1] * g);
+        if ((vx < 0 ? -vx : vx) > (gControllerPads[0].stick_x < 0 ? -gControllerPads[0].stick_x
+                                                                  : gControllerPads[0].stick_x)) {
+            gControllerPads[0].stick_x = vx;
+        }
+        if ((vy < 0 ? -vy : vy) > (gControllerPads[0].stick_y < 0 ? -gControllerPads[0].stick_y
+                                                                  : gControllerPads[0].stick_y)) {
+            gControllerPads[0].stick_y = vy;
+        }
+    }
+}
+
 void update_controller(s32 index) {
     struct Controller* controller = &gControllers[index];
     u16 stick;
 
-    if (sIsController1Unplugged) {
+    // The unplugged gate must not silence a VR-only player: with motion controllers live, pad 0
+    // always updates (the merge below is its input source even with no gamepad attached).
+    if (sIsController1Unplugged && !(index == 0 && vr_controllers_active())) {
         return;
+    }
+    if (index == 0) {
+        vr_merge_pad0();
     }
 
     // Prevents pause menu intereference while controlling flycam
@@ -680,6 +757,8 @@ void process_game_tick(void) {
     }
     
     func_80028F70(); // Player controller
+    race_mods_tick(); // port addition: knockout / turbo laps / kart size / item rain (race_mods.c)
+    race_mods_action_cam_tick(); // port addition: VR flip cam dramatic-state feed
 
     func_8028F474();
     func_80059AC8();

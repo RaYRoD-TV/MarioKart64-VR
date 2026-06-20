@@ -34,6 +34,9 @@ extern "C" {
     #include "collision.h"
     #include "memory.h"
     extern const char *d_course_yoshi_valley_dl_list[124];
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 YoshiValley::YoshiValley() {
@@ -141,21 +144,28 @@ void YoshiValley::BeginPlay() {
         SpawnActor<OFlagpole>(FVector(-2170, 0, 723), 0x400);
         SpawnActor<OFlagpole>(FVector(-2193, 0, 761), 0x400);
 
-        SpawnActor<OHedgehog>(FVector(-1683, -80, -88), FVector2D(-1650, -114), 9);
-        SpawnActor<OHedgehog>(FVector(-1636, -93, -147), FVector2D(-1661, -151), 9);
-        SpawnActor<OHedgehog>(FVector(-1628, -86, -108), FVector2D(-1666, -58), 9);
-        SpawnActor<OHedgehog>(FVector(-1676, -69, -30), FVector2D(-1651, -26), 9);
-        SpawnActor<OHedgehog>(FVector(-1227, -27, -989), FVector2D(-1194, -999), 26);
-        SpawnActor<OHedgehog>(FVector(-1261, -41, -880), FVector2D(-1213, -864), 26);
-        SpawnActor<OHedgehog>(FVector(-1342, -60, -830), FVector2D(-1249, -927), 26);
-        SpawnActor<OHedgehog>(FVector(-1429, -78, -849), FVector2D(-1347, -866), 26);
-        SpawnActor<OHedgehog>(FVector(-1492, -94, -774), FVector2D(-1427, -891), 26);
-        SpawnActor<OHedgehog>(FVector(-1453, -87, -784), FVector2D(-1509, -809), 26);
-        SpawnActor<OHedgehog>(FVector(-1488, 89, -852), FVector2D(-1464, -822), 26);
-        SpawnActor<OHedgehog>(FVector(-1301, 47, -904), FVector2D(-1537, -854), 26);
-        SpawnActor<OHedgehog>(FVector(-2587, 56, -259), FVector2D(-2624, -241), 28);
-        SpawnActor<OHedgehog>(FVector(-2493, 94, -454), FVector2D(-2505, -397), 28);
-        SpawnActor<OHedgehog>(FVector(-2477, 3, -57), FVector2D(-2539, -66), 28);
+        // PROP SWAP: the hedgehogs curl up at home and race_mods spawns the chosen menagerie
+        // along the racing line instead. The flagpoles and the giant egg stay - scenery, not
+        // movers.
+        if (race_mods_prop_swap_live()) {
+            race_mods_prop_swap_register(15);
+        } else {
+            SpawnActor<OHedgehog>(FVector(-1683, -80, -88), FVector2D(-1650, -114), 9);
+            SpawnActor<OHedgehog>(FVector(-1636, -93, -147), FVector2D(-1661, -151), 9);
+            SpawnActor<OHedgehog>(FVector(-1628, -86, -108), FVector2D(-1666, -58), 9);
+            SpawnActor<OHedgehog>(FVector(-1676, -69, -30), FVector2D(-1651, -26), 9);
+            SpawnActor<OHedgehog>(FVector(-1227, -27, -989), FVector2D(-1194, -999), 26);
+            SpawnActor<OHedgehog>(FVector(-1261, -41, -880), FVector2D(-1213, -864), 26);
+            SpawnActor<OHedgehog>(FVector(-1342, -60, -830), FVector2D(-1249, -927), 26);
+            SpawnActor<OHedgehog>(FVector(-1429, -78, -849), FVector2D(-1347, -866), 26);
+            SpawnActor<OHedgehog>(FVector(-1492, -94, -774), FVector2D(-1427, -891), 26);
+            SpawnActor<OHedgehog>(FVector(-1453, -87, -784), FVector2D(-1509, -809), 26);
+            SpawnActor<OHedgehog>(FVector(-1488, 89, -852), FVector2D(-1464, -822), 26);
+            SpawnActor<OHedgehog>(FVector(-1301, 47, -904), FVector2D(-1537, -854), 26);
+            SpawnActor<OHedgehog>(FVector(-2587, 56, -259), FVector2D(-2624, -241), 28);
+            SpawnActor<OHedgehog>(FVector(-2493, 94, -454), FVector2D(-2505, -397), 28);
+            SpawnActor<OHedgehog>(FVector(-2477, 3, -57), FVector2D(-2539, -66), 28);
+        }
     }
 
     if (gModeSelection == VERSUS) {

@@ -13,6 +13,7 @@ extern "C" {
 #include "update_objects.h"
 #include "code_80057C60.h"
 #include "code_8006E9C0.h"
+#include "code_800029B0.h" // gScreenOneCtx - gates the gVRSkyCloudM200 publish to the rendered screen
 #include "assets/models/common_data.h"
 #include "assets/textures/common_data.h"
 #include "math_util_2.h"
@@ -32,9 +33,16 @@ SkySnow::SkySnow(ScreenContext* screen) : SkyActor(screen) {
     _count += 1;
 }
 
+extern "C" float gVRSkyCloudM200; // VR sky-remap calibration - see SkyCloud.cpp (snow shares the formula)
+
 void SkySnow::Tick() {
 
     s16 mUnk200 = mScreen->camera->fieldOfView + 40.0f;
+    // Publish for the VR sky mapping (same angle-linear placement formula as SkyCloud, same screen gate) so
+    // snow tracks (Frappe) calibrate from THEIR live fov instead of a stale value from a prior track.
+    if (mScreen == gScreenOneCtx) {
+        gVRSkyCloudM200 = (float) mUnk200;
+    }
     mUnk208 = ((mUnk200 / 2) * 0xB6) + 0x71C;
     mUnk210 = (-(mUnk200 / 2) * 0xB6) - 0x71C;
     mUnk1E8 = 1.7578125 / mUnk200;

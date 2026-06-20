@@ -26,6 +26,7 @@
 #include <assets/models/common_data.h>
 #include <common_structs.h>
 #include "main.h"
+#include "race_mods.h"
 #include "menus.h"
 #include "menu_items.h"
 #include "audio/external.h"
@@ -655,9 +656,11 @@ s32 set_vehicle_render_distance_flags(Vec3f vehiclePos, f32 renderDistance, s32 
                 playerX = player->pos[0];
                 playerZ = player->pos[2];
 
-                // Is player within render distance
-                if (((playerX - renderDistance) < x) && ((playerX + renderDistance) > x) &&
-                    ((playerZ - renderDistance) < z) && ((playerZ + renderDistance) > z)) {
+                // Is player within render distance. With no-culling on, vehicle extras (the train
+                // and boat smoke ride this) render at any distance instead of the hardcoded radius.
+                if (CVarGetInteger("gNoCulling", 0) == 1 ||
+                    (((playerX - renderDistance) < x) && ((playerX + renderDistance) > x) &&
+                     ((playerZ - renderDistance) < z) && ((playerZ + renderDistance) > z))) {
                     // Sets the render flag to on for each player.
                     flag |= (RENDER_VEHICLE << i);
                 } else {
@@ -1509,7 +1512,9 @@ void update_player_path_completion(s32 playerId, Player* player) {
         if ((var_v1 != 0) && (playerZ <= gPathStartZ)) {
             if (gPathStartZ < previousPlayerZ) {
                 gLapCountByPlayerId[playerId]++;
-                if ((gModeSelection == GRAND_PRIX) && (gLapCountByPlayerId[playerId] == 5)) {
+                // The stock overflow trigger was a literal 5 = 3 laps + 2 post-finish crossings;
+                // scaled to the lap override so a legitimate lap 5 of a 5-lap race can't fire it.
+                if ((gModeSelection == GRAND_PRIX) && (gLapCountByPlayerId[playerId] == race_mods_total_laps() + 2)) {
                     if (gGPCurrentRaceRankByPlayerIdDup[playerId] == 7) {
                         // clang-format off
                         for (var_v0 = 0; var_v0 < NUM_PLAYERS; var_v0++) { gLapCountByPlayerId[var_v0]--; } // has to be one line to match
@@ -1601,6 +1606,142 @@ void update_player_timer_sound(s32 playerId, UNUSED Player* unused) {
     }
 }
 
+// 1P battle rivals drive themselves - the arenas have no waypoint paths (PathTable2 NULL) and zero
+// the AI path system out with AIMaximumSeparation -1, so the stock follower in update_player never
+// runs there. They roam toward item boxes (race_mods_battle_roam_target), steer around ledges by
+// probing the floor ahead (race_mods_battle_steer), and the separate shell pass attacks whoever
+// they pass near - a free-for-all. Two hard safety nets keep them honest on the tricky arena
+// shapes: a SNAP-BACK that yanks a kart off the void before it can fall, and an ANTI-STUCK kick
+// that wrenches the wheel when one wedges. Returns nonzero when it owned the kart this tick.
+static f32 sBattleSafeX[NUM_PLAYERS];
+static f32 sBattleSafeY[NUM_PLAYERS];
+static f32 sBattleSafeZ[NUM_PLAYERS];
+static f32 sBattleLastX[NUM_PLAYERS];
+static f32 sBattleLastZ[NUM_PLAYERS];
+static s32 sBattleStuck[NUM_PLAYERS];
+
+static s32 battle_cpu_drive(s32 playerId, Player* player) {
+    f32 roamX, roamZ;
+    f32 steerX, steerZ;
+    f32 ghNow, mdx, mdz;
+    f32 distToTgt2;
+    s16 angle;
+    s16 newAngle;
+    s32 status;
+    s32 boxedIn = 0;
+    f32 speed;
+    // A wider error window + a higher gain than the stock path follower (1.5 deg / 0x35): the
+    // stock numbers steer gently enough to hug a racing line, but an arena rival has to swing a
+    // sharp turn to dodge a ledge before its momentum carries it off. 6 deg / 0xB0 turns hard.
+    const s16 maxTurn = (s16) (6.0f * 182.0f);
+
+    status = race_mods_battle_cpu_target(playerId, NULL, NULL, NULL); // 0 not a battle CPU / 1 in / 2 out
+    if (status == 0) {
+        return 0;
+    }
+    if (status == 2) {
+        return 1; // out of the match - the bomb kart AI (player_controller.c) owns the kart
+    }
+
+    // SNAP-BACK (hard anti-fall): if the kart sits over the void or a killer drop, yank it back to
+    // the last spot it stood on solid ground and kill its momentum - it physically cannot fall off
+    // the arena. Otherwise this IS solid ground, so remember it.
+    ghNow = spawn_actor_on_surface(player->pos[0], player->pos[1] + 90.0f, player->pos[2]);
+    if (ghNow > -2999.0f && ghNow < 2999.0f && ghNow > player->pos[1] - 900.0f) {
+        sBattleSafeX[playerId] = player->pos[0];
+        sBattleSafeY[playerId] = player->pos[1];
+        sBattleSafeZ[playerId] = player->pos[2];
+    } else {
+        player->pos[0] = sBattleSafeX[playerId];
+        player->pos[1] = sBattleSafeY[playerId];
+        player->pos[2] = sBattleSafeZ[playerId];
+        player->velocity[0] = 0.0f;
+        player->velocity[1] = 0.0f;
+        player->velocity[2] = 0.0f;
+    }
+
+    // OBJECTIVE FIRST: who/what it is driving at (the prey's position, or a box). Resolved up front
+    // so the anti-stuck below can tell "wedged while travelling" from "jockeying right on top of the
+    // prey" - those need opposite handling.
+    race_mods_battle_roam_target(playerId, &roamX, &roamZ);
+    {
+        f32 tdx = roamX - player->pos[0];
+        f32 tdz = roamZ - player->pos[2];
+        distToTgt2 = tdx * tdx + tdz * tdz;
+    }
+
+    // ANTI-STUCK: only fires when it is trying to TRAVEL to a far target and not getting there. When
+    // it is already close (engaging / bumping the prey), slow movement is intentional jockeying, NOT
+    // a wedge - counting it there is what re-picked targets every frame and made them twitch.
+    mdx = player->pos[0] - sBattleLastX[playerId];
+    mdz = player->pos[2] - sBattleLastZ[playerId];
+    sBattleLastX[playerId] = player->pos[0];
+    sBattleLastZ[playerId] = player->pos[2];
+    if (distToTgt2 > (220.0f * 220.0f) && (mdx * mdx + mdz * mdz) < 1.5f) {
+        sBattleStuck[playerId]++;
+        if (sBattleStuck[playerId] > 40) {
+            race_mods_battle_roam_repick(playerId); // genuinely wedged in transit - try a new target
+            sBattleStuck[playerId] = 0;
+        }
+    } else {
+        sBattleStuck[playerId] = 0;
+    }
+
+    // STEER toward the target, edge-avoided by the floor probe. The free-for-all attacks come from
+    // the separate shell pass (battle_cpu_attack) - so closing in IS the aggression.
+    race_mods_battle_steer(playerId, roamX, roamZ, &steerX, &steerZ, &boxedIn);
+    gOffsetPosition[0] = steerX;
+    gOffsetPosition[1] = player->pos[1];
+    gOffsetPosition[2] = steerZ;
+    if (player->effects & (UNKNOWN_EFFECT_0x10000000 | UNKNOWN_EFFECT_0xC)) {
+        newAngle = 0; // spun out / squashed - no steering input until it clears
+    } else {
+        angle = -get_angle_between_two_vectors(player->pos, gOffsetPosition);
+        angle -= player->rotation[1];
+        if (angle > maxTurn) {
+            angle = maxTurn;
+        }
+        if (angle < (s16) -maxTurn) {
+            angle = -maxTurn;
+        }
+        // Weight the PREVIOUS wheel angle 2:1 against the new one so the steering eases into turns
+        // instead of snapping a new heading every frame (which read as the frantic twitch).
+        newAngle = (s16) (((gPreviousAngleSteering[playerId] * 2) + ((angle * 0xB0) / maxTurn)) / 3);
+    }
+    apply_cpu_turn(player, newAngle);
+    gPreviousAngleSteering[playerId] = newAngle;
+
+    // Brisk pursuit so they feel aggressive; a mild ease right on top of the prey so they jockey
+    // instead of bulldozing; crawl only when ledges box them in.
+    speed = player->topSpeed * race_mods_battle_cpu_heat() * 0.9f;
+    if (distToTgt2 < (110.0f * 110.0f)) {
+        speed *= 0.8f;
+    }
+    if (boxedIn) {
+        speed *= 0.5f; // ledges all around - crawl so momentum can't slide you off
+    }
+    cpu_TargetSpeed[playerId] = speed;
+    gPreviousCpuTargetSpeed[playerId] = speed;
+    regulate_cpu_speed(playerId, speed, player);
+
+    // --- BATTLE AI DIAGNOSTIC (temporary): proves this drive actually ran for the kart, and dumps
+    // what it decided - the roam target it is heading for, the edge-avoided steer point, the floor
+    // probe at its own spot, and whether it is boxed in / counted as stuck. If these lines never
+    // appear in the diag, the gate above rejected the kart and NONE of this code runs.
+    {
+        static s32 sBcdLog[NUM_PLAYERS];
+        if ((sBcdLog[playerId]++ % 30) == 0) {
+            race_mods_diag_line("[bcd] id=%d ran pos=(%.0f,%.0f,%.0f) roam=(%.0f,%.0f) steer=(%.0f,%.0f) "
+                                "selfGH=%.0f boxed=%d stuck=%d spd=%.1f",
+                                playerId, player->pos[0], player->pos[1], player->pos[2], roamX, roamZ,
+                                steerX, steerZ,
+                                spawn_actor_on_surface(player->pos[0], player->pos[1] + 90.0f, player->pos[2]),
+                                boxedIn, sBattleStuck[playerId], speed);
+        }
+    }
+    return 1;
+}
+
 void update_player(s32 playerId) {
     UNUSED s32 pad[14];
     s16 var_a0_2;
@@ -1620,6 +1761,12 @@ void update_player(s32 playerId) {
     f32 onePointFive = 1.5f;
 
     player = &gPlayers[playerId];
+    // 1P battle: the rivals' line-of-sight driver runs INSTEAD of everything below - the
+    // arenas' AIMaximumSeparation -1 gate would skip the body anyway, and the path follower
+    // must never touch the arenas' empty path arrays.
+    if ((player->type & PLAYER_CPU) && (player->type & PLAYER_EXISTS) && battle_cpu_drive(playerId, player)) {
+        return;
+    }
     if ((s32) CM_GetProps()->AIMaximumSeparation >= 0) {
         D_80163100[playerId] += 1;
         if (playerId == 0) {
@@ -1894,6 +2041,19 @@ void update_player(s32 playerId) {
                 gOffsetPosition[2] = (gPreviousPlayerAiOffsetZ[playerId] + gOffsetPosition[2]) * 0.5f; // average
                 gPreviousPlayerAiOffsetX[playerId] = gOffsetPosition[0];
                 gPreviousPlayerAiOffsetZ[playerId] = gOffsetPosition[2];
+                {
+                    // CPU hunts: an infected carrier runs the nearest survivor down, and in a
+                    // treasure hunt every CPU dives at the prize once it's in reach - the hunt
+                    // position IS the steering target, written into the smoothing history too
+                    // so the averager's lag can't trail a dodging kart (or orbit the box).
+                    f32 huntPos[3];
+                    if (race_mods_cpu_hunt_target(playerId, &huntPos[0], &huntPos[1], &huntPos[2])) {
+                        gOffsetPosition[0] = huntPos[0];
+                        gOffsetPosition[2] = huntPos[2];
+                        gPreviousPlayerAiOffsetX[playerId] = huntPos[0];
+                        gPreviousPlayerAiOffsetZ[playerId] = huntPos[2];
+                    }
+                }
                 minAngle = onePointFive * 182.0f;
                 maxAngle = -onePointFive * 182.0f;
 
@@ -1923,6 +2083,11 @@ void update_player(s32 playerId) {
                             steeringSensitivity = 0x0014;
                         }
                         break;
+                }
+                if (race_mods_cpu_hunt_target(playerId, NULL, NULL, NULL)) {
+                    steeringSensitivity = 0x0035; // prey/prize tracking beats lane discipline
+                    D_801630E8[playerId] = 0;     // never drift-lock mid-hunt - the fixed drift
+                    player->effects &= ~DRIFTING_EFFECT; // steering would override the chase angle
                 }
                 if ((cpu_BehaviourState[playerId] == CPU_BEHAVIOUR_STATE_RUNNING) &&
                     ((gTrackPositionFactor[playerId] > 0.9f) || (gTrackPositionFactor[playerId] < -0.9f))) {
@@ -1998,6 +2163,19 @@ void update_player(s32 playerId) {
                 // Override cpu speed for harder cpu enhancment
                 if (CVarGetInteger("gHarderCPU", 0) == 1) {
                     cpu_TargetSpeed[playerId] = player->topSpeed * 1.5f;
+                }
+
+                // CPU hunts run flat out everywhere - no corner lift, no off-track lift (the
+                // gHarderCPU full-throttle idiom; regulate_cpu_speed caps at what the kart can
+                // do). The one exception: the close-in treasure dive eases to curve throttle,
+                // because a 30-unit prize ring is un-hittable at a full-speed turn radius.
+                {
+                    s32 huntState = race_mods_cpu_hunt_target(playerId, NULL, NULL, NULL);
+                    if (huntState == 3) {
+                        cpu_TargetSpeed[playerId] = CM_GetProps()->CurveTargetSpeed[gCCSelection];
+                    } else if (huntState != 0) {
+                        cpu_TargetSpeed[playerId] = player->topSpeed * 1.5f;
+                    }
                 }
 
                 gCurrentCpuTargetSpeed = cpu_TargetSpeed[playerId];
@@ -6649,7 +6827,52 @@ void func_80019B50(s32 cameraIndex, u16 arg1) {
     D_801646C0[cameraIndex] = (s16) var_v0;
 }
 
+// VR Third Person: C-up steps our VR camera distance. The flat near/far zoom (the D_80164678 state machine
+// below) drives the camera through a path the VR chase camera doesn't pick up, so in VR Third Person we give
+// C-up a VR-native behavior: each fresh press (D_80164608==1, set in func_80019FB4 from buttonPressed & C-up)
+// cycles gVRThirdPersonDist through a few presets (read in GameCamera::SetViewProjection to pull the camera
+// back horizontally). Flat play + the other VR modes keep the original behavior untouched.
+extern bool  vr_is_active(void);
+extern int   vr_get_view_mode(void);
+extern void  CVarSetFloat(const char* name, float value);
+extern int   CVarGetInteger(const char* name, int defaultValue);
+extern void  CVarSetInteger(const char* name, int value);
+extern int   vr_pause_menu_is_open(void);
+
 void func_80019C50(s32 arg0) {
+    // VR: D-pad UP cycles ALL view modes (Third->First->Theater->Diorama->repeat) during a live race, when our
+    // pause overlay isn't open. Scope the WHOLE block to the local camera (arg0==0): this fn runs once per
+    // camera per frame, and a non-local camera's call (D-pad not held there) was resetting the shared static
+    // every frame, which re-cycled the mode every frame while held -> the "fighting/jank". Held + static
+    // edge-detect = exactly one cycle per fresh press. Locked until the race has STARTED (gRaceState >=
+    // RACE_IN_PROGRESS - pre-race init/staging/countdown blocked, racing AND post-finish allowed) so the
+    // view mode can't change mid Lakitu start transition, and SILENT - changing the VR view shouldn't
+    // play a sound.
+    if (arg0 == 0) {
+        static bool sDpadUpHeld = false;
+        bool up = vr_is_active() && gIsGamePaused == 0 && !vr_pause_menu_is_open() &&
+                  gRaceState >= RACE_IN_PROGRESS && (gControllers[0].button & U_JPAD);
+        if (up && !sDpadUpHeld) {
+            CVarSetInteger("gVRViewMode", (CVarGetInteger("gVRViewMode", 0) + 1) & 3);
+        }
+        sDpadUpHeld = up;
+    }
+    if (D_80164608[arg0] == 1 && vr_is_active()) {
+        // C-up camera zoom only makes sense in Third Person; in every other VR mode the press is
+        // eaten so the stock flat-game zoom state machine below can't shift the eye view around.
+        if (vr_get_view_mode() == 0) {
+            static const f32 kSteps[] = { 0.0f, 2.0f, 4.0f, 6.0f };
+            f32 cur = CVarGetFloat("gVRThirdPersonDist", 0.0f);
+            s32 idx = 0;
+            for (s32 i = 0; i < 4; i++) {
+                if (cur >= kSteps[i] - 0.5f) { idx = i; }
+            }
+            idx = (idx + 1) & 3;
+            CVarSetFloat("gVRThirdPersonDist", kSteps[idx]);
+            func_800C9060(arg0, SOUND_ARG_LOAD(0x19, 0x00, 0x90, 0x4F)); // reuse the zoom click sfx
+        }
+        return;
+    }
     switch (D_80164678[arg0]) {
         case 0:
             if (D_80164608[arg0] == 1) {
@@ -6670,11 +6893,24 @@ void func_80019C50(s32 arg0) {
 
 void look_behind_toggle(s32 cameraIdx) {
     static bool lookBehindActive[NUM_CAMERAS] = {0};
-    bool pressed = gControllers[cameraIdx].button & L_CBUTTONS; // button held
+    bool pressed = gControllers[cameraIdx].button & L_CBUTTONS; // button held (Y / Triangle on a pad)
     Camera* camera = &cameras[cameraIdx];
     ScreenContext* screenCtx = NULL;
 
-    if (CVarGetInteger("gLookBehind", false) == false) {
+    // D-pad DOWN (held) also looks behind - flatscreen and VR alike. Gated so it doesn't fire while a
+    // pause menu is using the d-pad (the R1 overlay in VR; the stock pause menus on flatscreen).
+    if (vr_is_active()) {
+        if (!vr_pause_menu_is_open() && (gControllers[cameraIdx].button & D_JPAD)) {
+            pressed = true;
+        }
+    } else if (gIsGamePaused == 0 && (gControllers[cameraIdx].button & D_JPAD)) {
+        pressed = true;
+    }
+    // Native on (hold D-pad Down, or Y/Triangle - it maps to C-Left). The Enhancements checkbox
+    // still turns it off for players who want the button back. Read the DISABLE cvar (default 0 =
+    // on) so a stale gLookBehind=0 saved in an older config can't suppress the native feature -
+    // the feature defaults on regardless of any prior toggle.
+    if (CVarGetInteger("gNoLookBehind", 0) != 0 && !vr_is_active()) {
         return;
     }
 
@@ -7607,7 +7843,9 @@ void cpu_use_item_strategy(s32 playerId) {
             break;
 
         case CPU_STRATEGY_END_ITEM_STAR:
-            if (!(player->effects & STAR_EFFECT)) {
+            // A carrier's star never ends - without the carrier escape this state waits forever
+            // and the CPU never touches another item.
+            if (!(player->effects & STAR_EFFECT) || race_mods_infected_carrier(playerId)) {
                 cpuStrategy->branch = CPU_STRATEGY_WAIT_NEXT_ITEM;
             }
             cpuStrategy->timer = 0;
@@ -7806,7 +8044,10 @@ void cpu_use_item_strategy(s32 playerId) {
     if (cpuStrategy->timer < 10000) {
         cpuStrategy->timer += 1;
     }
-    if (player->effects & (BOO_EFFECT | BOOST_EFFECT | STAR_EFFECT)) {
+    // The stock hold-while-powered-up reset would freeze an infected carrier's strategy FOREVER
+    // (their star never ends), so carriers keep their item timers running.
+    if ((player->effects & (BOO_EFFECT | BOOST_EFFECT | STAR_EFFECT)) &&
+        !race_mods_infected_carrier(playerId)) {
         cpuStrategy->timer = 0;
     }
 }

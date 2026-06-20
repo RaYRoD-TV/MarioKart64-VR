@@ -1,3 +1,4 @@
+extern short vr_item_throw_yaw_offset(int isHumanPlayer); // port/vr - head-aimed throws in VR first person
 #include <actors.h>
 #include <waypoints.h>
 #include <defines.h>
@@ -30,6 +31,35 @@ void func_802B3B44(struct ShellActor* shell) {
     Vec3f origPos;
 
     currentWaypoint = shell->pathIndex;
+    // CRASH GUARD: a blue shell homes by following the track's waypoint path, but BATTLE arenas
+    // have none (gCurrentTrackPath is NULL / a stale dummy, gSelectedPathCount 0). Now that 1P
+    // battle is playable, a blue shell used in an arena reached here and dereferenced a null /
+    // out-of-bounds path -> 0xC0000005 access violation. With no path to follow, home STRAIGHT at
+    // the target kart instead - it still chases and detonates (the LOCK_ON distance check pops it)
+    // rather than dangling forever and leaking the actor slot.
+    if (gModeSelection == BATTLE || gCurrentTrackPath == NULL || gSelectedPathCount == 0 ||
+        currentWaypoint >= gSelectedPathCount) {
+        s32 ti = gPlayerPositionLUT[0];
+        Player* tgt;
+        f32 dx, dy, dz, m;
+        if (ti < 0 || ti >= NUM_PLAYERS) {
+            ti = 0;
+        }
+        tgt = &gPlayers[ti];
+        dx = tgt->pos[0] - shell->pos[0];
+        dy = tgt->pos[1] - shell->pos[1];
+        dz = tgt->pos[2] - shell->pos[2];
+        m = sqrtf((dx * dx) + (dy * dy) + (dz * dz));
+        if (m > 0.01f) {
+            shell->velocity[0] = (dx / m) * 6.0f;
+            shell->velocity[1] = (dy / m) * 6.0f;
+            shell->velocity[2] = (dz / m) * 6.0f;
+        }
+        shell->pos[0] += shell->velocity[0];
+        shell->pos[1] += shell->velocity[1];
+        shell->pos[2] += shell->velocity[2];
+        return;
+    }
     temp_f2 = gCurrentTrackPath[currentWaypoint].x;
     temp_f12 = gCurrentTrackPath[currentWaypoint].y;
     temp_f28 = gCurrentTrackPath[currentWaypoint].z;
@@ -333,7 +363,7 @@ void update_actor_red_blue_shell(struct ShellActor* shell) {
                 somePosVel[0] = 0.0f;
                 somePosVel[1] = 0.0f;
                 somePosVel[2] = height;
-                func_802B64C4(somePosVel, (s16) (player->rotation[1] + player->unk_0C0));
+                func_802B64C4(somePosVel, (s16) (player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0)));
                 shell->velocity[0] = somePosVel[0];
                 shell->velocity[1] = somePosVel[1];
                 shell->velocity[2] = somePosVel[2];

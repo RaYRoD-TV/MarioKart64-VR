@@ -849,6 +849,8 @@ void OLakitu::update_object_lakitu_reverse(s32 objectIndex, s32 playerId) {
     }
 }
 
+extern "C" bool vr_is_active(void);
+
 void OLakitu::func_8007A66C(s32 objectIndex) {
     Player* player = &gPlayers[mPlayerId];
 
@@ -858,6 +860,14 @@ void OLakitu::func_8007A66C(s32 objectIndex) {
 
     Camera* camera = &cameras[mCameraId];
     u16 rot = 0x8000 - camera->rot[1];
+    // VR: place Lakitu relative to the KART's facing, not the camera's. The flat game frames him for the game
+    // camera's yaw, but the VR eye doesn't follow that camera's framing (start cinematics, VR eye pushes, free
+    // head look), so camera-relative placement can land him behind the player's view (the "Lakitu is behind me
+    // at the start" bug). Kart-relative keeps him ahead of the kart - where you look at the start line - in
+    // every VR view mode; flatscreen behavior is unchanged.
+    if (vr_is_active()) {
+        rot = 0x8000 - (u16) player->rotation[1];
+    }
 
     gObjectList[objectIndex].pos[0] =
         (player->pos[0] + (coss(rot) * (gObjectList[objectIndex].origin_pos[0] + gObjectList[objectIndex].offset[0]))) -
@@ -876,6 +886,11 @@ void OLakitu::func_8007A778(s32 objectIndex) {
     }
     Camera* camera = &cameras[mCameraId];
     u16 rot = 0x8000 - camera->rot[1];
+    // VR: kart-relative, not camera-relative - same reasoning as func_8007A66C above (the VR eye doesn't
+    // follow the game camera's framing, so camera-relative placement can land him out of view).
+    if (vr_is_active()) {
+        rot = 0x8000 - (u16) player->rotation[1];
+    }
 
     gObjectList[objectIndex].pos[0] =
         (player->pos[0] + (coss(rot) * (gObjectList[objectIndex].origin_pos[0] + gObjectList[objectIndex].offset[0]))) -

@@ -1853,6 +1853,28 @@ void sound_init(void) {
     }
 }
 
+// Restart helper: sound_init() above only clears the request QUEUE, so the kart engine + looping SFX (live
+// NOTES already allocated in the sequence players) keep playing across a race restart. Silence the live notes
+// + channels directly, then reset the request queue. IMPORTANT: do NOT call sequence_player_disable() here -
+// it also UNLOADS the sequence + sound banks (GameEngine_UnloadSequence/UnloadBank), and func_802903B0 is the
+// SHARED race-(re)entry transition (post-race RETRY / course change / our VR restart) with nothing on the
+// other side reloading banks - unloading here breaks engine SFX + music for every following race ("gas makes
+// weird sounds"). Stop the audio; leave the banks resident.
+void audio_stop_all_for_restart(void) {
+    extern void sequence_player_disable_channels(struct SequencePlayer* seqPlayer, u16 channelBits);
+    extern void note_pool_clear(struct NotePool* pool);
+    s32 i;
+    for (i = 0; i < SEQUENCE_PLAYERS; i++) {
+        if (gSequencePlayers[i].enabled) {
+            sequence_player_disable_channels(&gSequencePlayers[i], 0xFFFF);
+            note_pool_clear(&gSequencePlayers[i].notePool);
+            gSequencePlayers[i].finished = true;
+            gSequencePlayers[i].enabled = false;
+        }
+    }
+    sound_init();
+}
+
 void func_800C5BD0(void) {
     if (D_800EA1C0 == 0) {
         func_800CBBE8(((D_800EA154[gPlayers[0].characterId] & 0xFFFF) << 8) | 0xF3000000, 0);
@@ -2453,6 +2475,26 @@ void func_800C70A8(u8 playerId) {
     }
 }
 
+// race_mods.c: true when playerId crossed the line on the LOSING side of a one-winner match
+// (someone else claimed the treasure; the infection took a carrier's match). The finish fanfare
+// and the character's voice line below must not cheer "yippee" while a CPU drives off with the
+// prize, no matter what slot the rank table froze this kart in.
+extern int race_mods_finish_demoted(int playerId);
+extern int race_mods_finish_promoted(int playerId);
+
+// The rank the finish reactions should ACT on: demoted finishers read as dead last, so they get
+// the losing fanfare and the disappointed voice line instead of the top-four celebration; a
+// promoted finisher (tag's least-time-IT winner who placed low) reads as first so they cheer.
+static s32 finish_reaction_rank(u8 playerId) {
+    if (race_mods_finish_promoted(playerId)) {
+        return 0;
+    }
+    if (race_mods_finish_demoted(playerId)) {
+        return 7;
+    }
+    return gPlayers[playerId].currentRank;
+}
+
 void func_800C76C0(u8 playerId) {
     if (D_800E9EA4[playerId] != 0) {
         if (D_800E9EA4[playerId] < 0x2BC) {
@@ -2472,12 +2514,12 @@ void func_800C76C0(u8 playerId) {
                         func_800C3448(0x100100FF);
                         func_800C3448(0x110100FF);
                         func_800C5278(5U);
-                        if (gPlayers[playerId].currentRank == 0) {
+                        if (finish_reaction_rank(playerId) == 0) {
                             func_800C97C4(playerId);
                             D_800EA0F0 = 2;
                             func_800C9A88(playerId);
                             play_sequences(MUSIC_SEQ_FINISH_1ST_PLACE, MUSIC_SEQ_WINNING_RESULTS);
-                        } else if (gPlayers[playerId].currentRank < 4) {
+                        } else if (finish_reaction_rank(playerId) < 4) {
                             func_800C97C4(playerId);
                             D_800EA0F0 = 2;
                             func_800C9A88(playerId);
@@ -2489,14 +2531,14 @@ void func_800C76C0(u8 playerId) {
                     } else {
                         D_800EA0EC[playerId] = 2;
                         func_800C9060(playerId, 0x1900F103U);
-                        if (gPlayers[playerId].currentRank == 0) {
+                        if (finish_reaction_rank(playerId) == 0) {
                             func_800C3448(0x100100FF);
                             func_800C3448(0x110100FF);
                             func_800C97C4(playerId);
                             D_800EA0F0 = 2;
                             func_800C9A88(playerId);
                             play_sequences(MUSIC_SEQ_FINISH_1ST_PLACE, MUSIC_SEQ_WINNING_RESULTS);
-                        } else if (gPlayers[playerId].currentRank < 4) {
+                        } else if (finish_reaction_rank(playerId) < 4) {
                             if (D_800EA104 == 0) {
                                 func_800C3448(0x100100FF);
                                 func_800C3448(0x110100FF);
@@ -2634,11 +2676,11 @@ void func_800C76C0(u8 playerId) {
                 case BATTLE:          /* switch 3 */
                     break;
                 case GRAND_PRIX: /* switch 3 */
-                    if (gPlayers[playerId].currentRank == 0) {
+                    if (finish_reaction_rank(playerId) == 0) {
                         D_800EA0EC[playerId] = 2;
                         func_800C90F4(playerId,
                                       (gPlayers[playerId].characterId * 0x10) + SOUND_ARG_LOAD(0x29, 0x00, 0x80, 0x07));
-                    } else if (gPlayers[playerId].currentRank < 4) {
+                    } else if (finish_reaction_rank(playerId) < 4) {
                         D_800EA0EC[playerId] = 2;
                         func_800C90F4(playerId,
                                       (gPlayers[playerId].characterId * 0x10) + SOUND_ARG_LOAD(0x29, 0x00, 0x80, 0x0D));
@@ -2649,7 +2691,7 @@ void func_800C76C0(u8 playerId) {
                     }
                     break;
                 case VERSUS: /* switch 3 */
-                    if (gPlayers[playerId].currentRank == 0) {
+                    if (finish_reaction_rank(playerId) == 0) {
                         D_800EA0EC[playerId] = 2;
                         func_800C90F4(playerId,
                                       (gPlayers[playerId].characterId * 0x10) + SOUND_ARG_LOAD(0x29, 0x00, 0x80, 0x0D));
@@ -2670,7 +2712,7 @@ void func_800C76C0(u8 playerId) {
         }
         switch (gModeSelection) { /* switch 4; irregular */
             case GRAND_PRIX:      /* switch 4 */
-                if (gPlayers[playerId].currentRank == 0) {
+                if (finish_reaction_rank(playerId) == 0) {
                     if (D_800E9EA4[playerId] >= 0x15F) {
                         if (D_800E9EA4[playerId] == 0x0000015F) {
                             func_800C9D0C(playerId);
@@ -2678,7 +2720,7 @@ void func_800C76C0(u8 playerId) {
                     } else {
                         D_800EA130[playerId] = (f32) D_800E9EA4[playerId] / 400.0f;
                     }
-                } else if (gPlayers[playerId].currentRank < 4) {
+                } else if (finish_reaction_rank(playerId) < 4) {
                     if (D_800E9EA4[playerId] >= 0x15F) {
                         if (D_800E9EA4[playerId] == 0x0000015F) {
                             func_800C9D0C(playerId);

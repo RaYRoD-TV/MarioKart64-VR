@@ -24,6 +24,13 @@ class OChainChomp : public OObject {
 public:
     explicit OChainChomp();
     explicit OChainChomp(const SpawnParams& params);
+    // Track-hazard spawn (race_mods.c): an EXPLICIT indexObjectList2 slot, clear of the low
+    // entries other courses' stock objects use (cheep cheeps, trophies) - _count stays the
+    // instance counter only.
+    explicit OChainChomp(size_t fixedSlot);
+    // Prop-swap spawn (race_mods.c PROPS row): explicit slot AND an explicit racing-line start
+    // waypoint - the takeover spreads its chomps evenly, where the slot formula would bunch them.
+    explicit OChainChomp(size_t fixedSlot, s32 pathStart);
 
 
     ~OChainChomp() {
@@ -45,4 +52,7 @@ private:
     FVector _pos;
     static size_t _count;
     size_t _idx;
+    s32 _pathStart = -1; // explicit racing-line start waypoint (prop swap); -1 = derive from the slot
+    bool _diagTicked = false; // one-shot racemods_diag.txt breadcrumbs - spawn/tick/draw chain
+    bool _diagDrawn = false;
 };

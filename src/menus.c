@@ -1,4 +1,6 @@
 #include <libultraship.h>
+#include <stdio.h>
+#include <time.h>
 #include <libultraship/bridge/audiobridge.h>
 #include <macros.h>
 #include <defines.h>
@@ -16,6 +18,8 @@
 #include "code_800029B0.h"
 #include "code_80005FD0.h"
 #include "menu_items.h"
+#include "quit_menu.h"
+#include "race_mods_menu.h"
 #include "code_800AF9B0.h"
 #include "save.h"
 #include "replays.h"
@@ -74,8 +78,8 @@ s8 gGameModeMenuColumn[NUM_ROWS_GAME_MODE_MENU] = { 0, 0, 0, 0 };
 // For Grand Prix and Versus, this will be the CC mode selected. For Time Trials, it will
 // be whether 'Begin' or 'Data' is selected. Not used for Battle.
 // indexed as [column][row]
-s8 gGameModeSubMenuColumn[NUM_COLUMN_GAME_MODE_SUB_MENU][NUM_ROWS_GAME_MODE_SUB_MENU] = { 
-    { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }
+s8 gGameModeSubMenuColumn[NUM_COLUMN_GAME_MODE_SUB_MENU][NUM_ROWS_GAME_MODE_SUB_MENU] = {
+    { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }
 };
 
 s8 gNextDemoId = 0;
@@ -101,31 +105,38 @@ const s8 sScreenModePlayerTable[] = { SCREEN_MODE_1P, SCREEN_MODE_2P_SPLITSCREEN
 const s8 sScreenModePlayerCount[] = { 1, 2, 2, 3, 4 };
 
 // Set indexed slots numbers for one-two-three-four mode selection
-const s8 gPlayerModeSelection[] = { 1, 2, 1, 1 };
+// Port additions: 1p gained VERSUS (duel vs a random CPU rival), then BATTLE (arena vs CPU
+// rivals) - four rows where stock had two.
+// 1P BATTLE is currently hidden: the 1p limit is 2 (GP, TT, VS) instead of 3, so the BATTLE
+// row (index 3) is neither rendered nor selectable. Restore to 3 to bring it back. The BATTLE
+// entries in gGameModePlayerSelection / sGameModePlayerColumn* are left intact for re-enabling.
+const s8 gPlayerModeSelection[] = { 2, 2, 1, 1 };
 
-// Limit for each index column in one-two-three-four mode selection
-const s8 sGameModePlayerColumnDefault[][3] = {
-    { 2, 1, 0 }, // 1p (GP options, TT options, ...)
-    { 2, 2, 0 }, // 2p (GP options, VS options, Battle)
-    { 2, 0, 0 }, // 3p (VS options, Battle, ...)
-    { 2, 0, 0 }, // 4p (VS options, Battle, ...)
+// Limit for each index column in one-two-three-four mode selection.
+// Port addition: every CC list has one extra row at the end - CUSTOM, the race setup screen
+// (hence 3 where stock had 2, and 4 where stock had 3). TT and Battle columns are untouched.
+const s8 sGameModePlayerColumnDefault[][4] = {
+    { 3, 1, 3, 0 }, // 1p (GP options, TT options, VS options, Battle)
+    { 3, 3, 0, 0 }, // 2p (GP options, VS options, Battle, ...)
+    { 3, 0, 0, 0 }, // 3p (VS options, Battle, ...)
+    { 3, 0, 0, 0 }, // 4p (VS options, Battle, ...)
 };
 
 // Limit for each index column in one-two-three-four mode selection
-// for extra mode (mirror mode), hence the extra value (3 instead of 2)
-const s8 sGameModePlayerColumnExtra[][3] = {
-    { 3, 1, 0 }, // 1p (GP options, TT options, ...)
-    { 3, 3, 0 }, // 2p (GP options, VS options, Battle)
-    { 3, 0, 0 }, // 3p (VS options, Battle, ...)
-    { 3, 0, 0 }, // 4p (VS options, Battle, ...)
+// for extra mode (mirror mode), hence the extra value (4 instead of 3)
+const s8 sGameModePlayerColumnExtra[][4] = {
+    { 4, 1, 4, 0 }, // 1p (GP options, TT options, VS options, Battle)
+    { 4, 4, 0, 0 }, // 2p (GP options, VS options, Battle, ...)
+    { 4, 0, 0, 0 }, // 3p (VS options, Battle, ...)
+    { 4, 0, 0, 0 }, // 4p (VS options, Battle, ...)
 };
 
 // Modes to select in one-two-three-four mode selection
-const s32 gGameModePlayerSelection[][3] = {
-    { GRAND_PRIX, TIME_TRIALS, 0x00000000 }, // 1p game modes
-    { GRAND_PRIX, VERSUS, BATTLE },          // 2p game modes
-    { VERSUS, BATTLE, 0x00000000 },          // 3p game modes
-    { VERSUS, BATTLE, 0x00000000 },          // 4p game modes
+const s32 gGameModePlayerSelection[][4] = {
+    { GRAND_PRIX, TIME_TRIALS, VERSUS, BATTLE }, // 1p game modes (VS duel + BATTLE vs CPU rivals)
+    { GRAND_PRIX, VERSUS, BATTLE, 0x00000000 },  // 2p game modes
+    { VERSUS, BATTLE, 0x00000000, 0x00000000 },  // 3p game modes
+    { VERSUS, BATTLE, 0x00000000, 0x00000000 },  // 4p game modes
 };
 
 // Map from character grid position id to character id
@@ -162,6 +173,10 @@ const union GameModePack sSoundMenuPack = { { SOUND_STEREO, SOUND_HEADPHONES, SO
  */
 void update_menus(void) {
     u16 controllerIdx;
+
+    // Pause-menu RACE SETUP return: once a mid-race quit lands back on the main menu, this drives
+    // the menu to the OK screen and re-opens the setup overlay (no-op until then / when not armed).
+    race_mods_menu_reopen_poll();
 
     if (gFadeModeSelection == FADE_MODE_NONE) {
         for (controllerIdx = 0; controllerIdx < 4; controllerIdx++) {
@@ -1263,26 +1278,51 @@ void setup_game_mode_selected(void) {
     // For Grand Prix and Versus, this will be the CC mode selected. For Time Trials, it will
     // be whether 'Begin' or 'Data' is selected. Not used for Battle.
     s8 subMenuMode = gGameModeSubMenuColumn[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]];
+    // NOTE: the GP shuffle is deliberately NOT reset here - this function can run on flows that are
+    // part of an in-progress GP, which silently un-shuffled the roulette's track order after race 1.
+    // The shuffle now clears only when the player manually confirms a cup (the stock-order intent).
+    // Port addition: a stale rival pick or duel flag must never leak into a later flow - the
+    // character screen and the course commit (both after this) re-set them when the 1P VERSUS
+    // flow is live.
+    CVarSetInteger("gDuelRival", 0);
+    CVarSetInteger("gVersusDuel", 0);
     // Determine which game mode was selected based on the number of players and the row selected on the main menu
     switch (gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]]) {
         case GRAND_PRIX:
-            gCCSelection = subMenuMode;
-            gPlaceItemBoxes = 1;
-            set_mirror_mode((subMenuMode == CC_EXTRA) ? 1 : 0);
-            break;
         case VERSUS:
-            gCCSelection = subMenuMode;
+            // Port addition: 1P VERSUS keeps gModeSelection = VERSUS through the character and
+            // course screens (the stock VS layouts, including the rival pick and the course list).
+            // Flipping to GRAND_PRIX here never stuck anyway - main_menu_act re-derives
+            // gModeSelection from the menu table right after this returns - and a VERSUS race with
+            // one player has no spawn path at all (no kart ever spawned: the old "stuck in a weird
+            // spot, can't move" race). The duel commit lives in course_select_menu_act's OK.
+            // Port addition: the CC list's last row is CUSTOM - 150 physics, race mods from the
+            // setup screen. The stock rows reset the mods so a plain CC pick is a vanilla race.
+            if (subMenuMode == custom_cc_row_index()) {
+                gCCSelection = CC_150;
+                set_mirror_mode(0); // the setup screen's MIRROR row re-applies after this returns
+            } else {
+                gCCSelection = subMenuMode;
+                set_mirror_mode((subMenuMode == CC_EXTRA) ? 1 : 0);
+                race_mods_reset_to_stock();
+            }
             gPlaceItemBoxes = 1;
-            set_mirror_mode((subMenuMode == CC_EXTRA) ? 1 : 0);
             break;
         case BATTLE:
             gPlaceItemBoxes = 1;
             set_mirror_mode(0);
+            // Port addition: 1P battle keeps its setup-screen picks (rivals, balloons, items,
+            // size...) - this runs at the OK confirm, right after the player set them. The
+            // battle CVars are inert in every other mode, so nothing leaks.
+            if (gPlayerCount != 1) {
+                race_mods_reset_to_stock();
+            }
             break;
         case TIME_TRIALS:
             gCCSelection = CC_100;
             set_mirror_mode(0);
             gPlaceItemBoxes = 0;
+            race_mods_reset_to_stock();
 
             if ((subMenuMode && subMenuMode) && subMenuMode) {}
 
@@ -1314,6 +1354,12 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                 break;
             }
             case MAIN_MENU_PLAYER_SELECT: {
+                // Port addition: Z QUIT confirm. Z opens the A YES / B NO dialog; while it's up (or a quit
+                // is pending) it owns every press, so the stock chain below must not see this frame's input.
+                if (quit_menu_input(btnAndStick)) {
+                    newMode = gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]];
+                    break;
+                }
                 if ((btnAndStick & R_JPAD) && gPlayerCount < 4) {
                     gPlayerCount += 1;
                     reset_cycle_flash_menu();
@@ -1407,6 +1453,12 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                         case 3:
                             gMainMenuSelection = MAIN_MENU_OK_SELECT;
                             play_sound2(SOUND_MENU_BATTLE);
+                            // Port addition: 1P BATTLE has no CC list, so the battle setup
+                            // screen (balloons, rivals, CPU heat...) opens straight off the
+                            // row - the OK case already routes input through it.
+                            if (gPlayerCount == 1) {
+                                race_mods_open_battle();
+                            }
                             break;
                         default:
                             gMainMenuSelection = MAIN_MENU_OK_SELECT;
@@ -1478,6 +1530,11 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                         gMainMenuSelection = MAIN_MENU_OK_SELECT;
                         play_sound2(SOUND_MENU_SELECT);
                         gMenuTimingCounter = 0;
+                        // Port addition: the CC list's last row is CUSTOM - open the race setup
+                        // screen on the way to OK. TT and Battle columns can't reach this index.
+                        if (subMode == custom_cc_row_index()) {
+                            race_mods_open();
+                        }
                     }
                     newMode = gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]];
                 } else {
@@ -1488,6 +1545,21 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
             }
             case MAIN_MENU_OK_SELECT:
             case MAIN_MENU_OK_SELECT_GO_BACK: {
+                // Port addition: the race setup screen sits between OK and character select. While it's
+                // up it owns every press; START RACE (2) runs the stock begin transition below.
+                s32 raceMods = race_mods_input(btnAndStick);
+                if (raceMods != 0) {
+                    if (raceMods == 2) {
+                        func_8009E1C0();
+                        play_sound2(SOUND_MENU_OK_CLICKED);
+                        setup_game_mode_selected();
+                        if (CVarGetInteger("gMirrorForce", 0)) {
+                            set_mirror_mode(1); // force mirror at any class (stock only mirrors EXTRA)
+                        }
+                    }
+                    newMode = gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]];
+                    break;
+                }
                 if ((controllerIdx == PLAYER_ONE) && (++gMenuTimingCounter == 60 || gMenuTimingCounter % 300 == 0)) {
                     play_sound2(SOUND_MENU_OK);
                 }
@@ -1514,6 +1586,9 @@ void main_menu_act(struct Controller* controller, u16 controllerIdx) {
                     func_8009E1C0();
                     play_sound2(SOUND_MENU_OK_CLICKED);
                     setup_game_mode_selected();
+                    if (CVarGetInteger("gMirrorForce", 0)) {
+                        set_mirror_mode(1); // CUSTOM races only - stock picks zero the flag in setup
+                    }
                     newMode = gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]];
                 } else {
                     newMode = gGameModePlayerSelection[gPlayerCount - 1][gGameModeMenuColumn[gPlayerCount - 1]];
@@ -1576,7 +1651,27 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
     if (!is_screen_being_faded()) {
         switch (gPlayerSelectMenuSelection) {
             case PLAYER_SELECT_MENU_MAIN: {
-                savedSelection = gCharacterGridSelections[controllerIdx];
+                // Port addition: 1P VERSUS picks the rival on this screen too. Once your own
+                // driver is locked, the same controller keeps going on the second grid slot - the
+                // stock P2 cursor and portrait highlight render from that slot's state as-is, and
+                // the unique-character rule already keeps the rival off your own driver.
+                s32 slot = controllerIdx;
+                s32 rivalPhase = 0;
+                if (versus_1p_flow_active() && controllerIdx == 0 && gCharacterGridIsSelected[0]) {
+                    rivalPhase = 1;
+                    slot = 1;
+                    if (gCharacterGridSelections[1] == 0) { // wake the rival cursor on a free spot
+                        for (i = 1; i <= 8; i++) {
+                            if (is_character_spot_free(i)) {
+                                gCharacterGridSelections[1] = i;
+                                play_sound2(0x49008000);
+                                break;
+                            }
+                        }
+                        break; // give the new cursor a frame before input drives it
+                    }
+                }
+                savedSelection = gCharacterGridSelections[slot];
                 if (savedSelection == 0) {
                     if (btnAndStick & B_BUTTON) {
                         func_8009E208();
@@ -1586,8 +1681,13 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                 }
                 // L800B3630
                 if (btnAndStick & B_BUTTON) {
-                    if (gCharacterGridIsSelected[controllerIdx]) {
-                        gCharacterGridIsSelected[controllerIdx] = false;
+                    if (gCharacterGridIsSelected[slot]) {
+                        gCharacterGridIsSelected[slot] = false;
+                        play_sound2(SOUND_MENU_GO_BACK);
+                    } else if (rivalPhase) {
+                        // back out of the rival pick: drop its cursor, unlock your own driver
+                        gCharacterGridSelections[1] = 0;
+                        gCharacterGridIsSelected[0] = false;
                         play_sound2(SOUND_MENU_GO_BACK);
                     } else {
                         func_8009E208();
@@ -1595,9 +1695,26 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                     }
                 }
                 // L800B3684
-                if ((btnAndStick & A_BUTTON) && (gCharacterGridIsSelected[controllerIdx] == 0)) {
-                    gCharacterGridIsSelected[controllerIdx] = true;
-                    i = sCharacterGridOrder[gCharacterGridSelections[controllerIdx] - 1];
+                if ((btnAndStick & A_BUTTON) && (gCharacterGridIsSelected[slot] == 0)) {
+                    gCharacterGridIsSelected[slot] = true;
+                    i = sCharacterGridOrder[gCharacterGridSelections[slot] - 1];
+                    if (rivalPhase) {
+                        // the duel spawn reads this pick (character id + 1, 0 = nothing picked)
+                        CVarSetInteger("gDuelRival", i + 1);
+                    }
+                    // 1P VERSUS: wake the rival cursor NOW, in the same press that locked your
+                    // driver - the all-selected check below runs this same frame, and with slot
+                    // one still empty it advanced straight to OK before the rival pick existed.
+                    if (versus_1p_flow_active() && controllerIdx == 0 && slot == 0 &&
+                        gCharacterGridSelections[1] == 0) {
+                        s8 spot;
+                        for (spot = 1; spot <= 8; spot++) {
+                            if (is_character_spot_free(spot)) {
+                                gCharacterGridSelections[1] = spot;
+                                break;
+                            }
+                        }
+                    }
                     func_800C90F4(controllerIdx, 0x2900800e + (i << 4));
                 }
                 // L800B36F4
@@ -1617,13 +1734,13 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                 }
 
                 // L800B3768
-                if (gCharacterGridIsSelected[controllerIdx] == 0) {
+                if (gCharacterGridIsSelected[slot] == 0) {
                     if ((btnAndStick & CONT_RIGHT) && (btnAndStick & CONT_DOWN)) {
                         if (savedSelection == 1 || savedSelection == 2 || savedSelection == 3) {
                             // L800B37B0
                             savedSelection += 5;
                             if (is_character_spot_free(savedSelection)) {
-                                gCharacterGridSelections[controllerIdx] = savedSelection;
+                                gCharacterGridSelections[slot] = savedSelection;
                                 play_sound2(0x49008000);
                             }
                         }
@@ -1634,7 +1751,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         if (savedSelection == 2 || savedSelection == 3 || savedSelection == 4) {
                             savedSelection += 3;
                             if (is_character_spot_free(savedSelection)) {
-                                gCharacterGridSelections[controllerIdx] = savedSelection;
+                                gCharacterGridSelections[slot] = savedSelection;
                                 play_sound2(0x49008000);
                             }
                         }
@@ -1645,7 +1762,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         if (savedSelection == 5 || savedSelection == 6 || savedSelection == 7) {
                             savedSelection -= 3;
                             if (is_character_spot_free(savedSelection)) {
-                                gCharacterGridSelections[controllerIdx] = savedSelection;
+                                gCharacterGridSelections[slot] = savedSelection;
                                 play_sound2(0x49008000);
                             }
                         }
@@ -1656,7 +1773,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         if (savedSelection == 6 || savedSelection == 7 || savedSelection == 8) {
                             savedSelection -= 5;
                             if (is_character_spot_free(savedSelection)) {
-                                gCharacterGridSelections[controllerIdx] = savedSelection;
+                                gCharacterGridSelections[slot] = savedSelection;
                                 play_sound2(0x49008000);
                             }
                         }
@@ -1670,7 +1787,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         do {
                             // L800B391C
                             if (is_character_spot_free(savedSelection)) {
-                                gCharacterGridSelections[controllerIdx] = savedSelection;
+                                gCharacterGridSelections[slot] = savedSelection;
                                 play_sound2(0x49008000); // play_sound2(0x49008000);
                                 break;
                             }
@@ -1687,7 +1804,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         savedSelection -= 1;
                         do {
                             if (is_character_spot_free(savedSelection)) {
-                                gCharacterGridSelections[controllerIdx] = savedSelection;
+                                gCharacterGridSelections[slot] = savedSelection;
                                 play_sound2(0x49008000);
                                 break;
                             }
@@ -1706,7 +1823,7 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                     }
                     // L800B3A30
                     if (is_character_spot_free(savedSelection)) {
-                        gCharacterGridSelections[controllerIdx] = savedSelection;
+                        gCharacterGridSelections[slot] = savedSelection;
                         play_sound2(0x49008000);
                     }
                 }
@@ -1724,7 +1841,8 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                 // L800B3AA4
                 if (btnAndStick & B_BUTTON) {
                     gPlayerSelectMenuSelection = PLAYER_SELECT_MENU_MAIN;
-                    gCharacterGridIsSelected[controllerIdx] = false;
+                    // 1P VERSUS: the rival was the last lock, so B unlocks it - not your driver
+                    gCharacterGridIsSelected[versus_1p_flow_active() ? 1 : controllerIdx] = false;
                     play_sound2(SOUND_MENU_GO_BACK);
                     break;
                 }
@@ -1741,6 +1859,11 @@ void player_select_menu_act(struct Controller* controller, u16 controllerIdx) {
         if (gCharacterGridSelections[controllerIdx] != 0) {
             gCharacterSelections[controllerIdx] = sCharacterGridOrder[gCharacterGridSelections[controllerIdx] - 1];
         }
+        // Port addition: 1P VERSUS - mirror the rival slot's pick the same way (slot one's grid
+        // state is driven by controller one's input redirect above).
+        if (versus_1p_flow_active() && gCharacterGridSelections[1] != 0) {
+            gCharacterSelections[1] = sCharacterGridOrder[gCharacterGridSelections[1] - 1];
+        }
     }
     // L800B3B44
 }
@@ -1755,8 +1878,221 @@ u32 GetCupIndex(void);
 /**
  * Navigation of the map select track menu screen
  */
+// Port addition: track roulette. Z on the course select screen rerolls - a random cup/slot for VS
+// and Time Trials, a random arena for Battle, and for a Grand Prix it SHUFFLES the order the cup's
+// four tracks are played in. Indices roll against gCupCourseOrder so no course id ranges are
+// assumed; cursor + browser are re-synced so anything re-deriving the course from cup state agrees.
+
+// The roulette's own RNG. The game's random_int is wrong for this twice over: gRandomSeed16 only
+// advances when gameplay rolls something, so in the menus the sequence repeats from boot (the
+// roulette dealt the same track every session), and its float scaling effectively never returns
+// the top value (the last cup and the fourth track of every cup were unreachable). A xorshift32
+// re-seeded from wall time at the human-paced moment the spin starts is uniform and fresh per press.
+static u32 sRouletteRngState = 0;
+
+static u32 roulette_rng(void) {
+    u32 x = sRouletteRngState;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    sRouletteRngState = x;
+    return x;
+}
+
+static u32 roulette_rng_range(u32 n) { // uniform 0..n-1
+    return (u32) (((u64) roulette_rng() * (u64) n) >> 32);
+}
+
+static void roulette_seed(void) {
+    sRouletteRngState ^= (u32) time(NULL);
+    sRouletteRngState ^= (u32) clock() * 2654435761u; // ms since launch - paced by the player's press
+    sRouletteRngState += 0x9E3779B9u;
+    if (sRouletteRngState == 0) {
+        sRouletteRngState = 0x12345687u;
+    }
+    roulette_rng();
+    roulette_rng();
+    roulette_rng();
+}
+
+// The shuffled play order for a GP cup. Every gCupCourseOrder read on the GP path goes through
+// cup_course_at, so the course list display, the commit, and the post-race advance all agree.
+static s8 sGPOrderShuffled = 0;
+static s8 sGPShuffledCup = -1;
+static s8 sGPShuffledOrder[4] = { 0, 1, 2, 3 };
+
+s16 cup_course_at(s32 cup, s32 idx) {
+    if (sGPOrderShuffled && gModeSelection == GRAND_PRIX && cup == sGPShuffledCup && idx >= 0 && idx < 4) {
+        idx = sGPShuffledOrder[idx];
+    }
+    return gCupCourseOrder[cup][idx];
+}
+
+void roulette_reset_shuffle(void) {
+    if (sGPOrderShuffled) { // TEMP diag - catches whatever clears a live shuffle mid-GP
+        FILE* df = fopen("roulette_diag.txt", "a");
+        if (df != NULL) {
+            fprintf(df, "reset: cleared a live shuffle (cup=%d)\n", sGPShuffledCup);
+            fclose(df);
+        }
+    }
+    sGPOrderShuffled = 0;
+    sGPShuffledCup = -1;
+}
+
+static void roulette_shuffle_cup(void) {
+    s32 i, j, t, identity, tries;
+    for (tries = 0; tries < 8; tries++) {
+        for (i = 0; i < 4; i++) {
+            sGPShuffledOrder[i] = i;
+        }
+        for (i = 3; i > 0; i--) {
+            j = (s32) roulette_rng_range((u32) i + 1u); // unbiased Fisher-Yates: j spans 0..i
+            t = sGPShuffledOrder[i];
+            sGPShuffledOrder[i] = sGPShuffledOrder[j];
+            sGPShuffledOrder[j] = t;
+        }
+        identity = 1;
+        for (i = 0; i < 4; i++) {
+            if (sGPShuffledOrder[i] != i) {
+                identity = 0;
+            }
+        }
+        if (!identity) { // a shuffle that changes nothing reads as the button not working
+            break;
+        }
+    }
+    sGPOrderShuffled = 1;
+    sGPShuffledCup = gCupSelection;
+    { // TEMP diag - the order the roulette dealt for this cup
+        FILE* df = fopen("roulette_diag.txt", "a");
+        if (df != NULL) {
+            fprintf(df, "shuffle: cup=%d order=%d,%d,%d,%d\n", sGPShuffledCup, sGPShuffledOrder[0],
+                    sGPShuffledOrder[1], sGPShuffledOrder[2], sGPShuffledOrder[3]);
+            fclose(df);
+        }
+    }
+}
+
+// --- the roulette spin: a slot-machine wheel that sweeps the list IN ORDER and decelerates onto a
+// random landing. The hop count is the randomness (at least one full revolution plus a uniform
+// 0..wheel-1 extra, so every landing is equally likely), and the final hop IS the landing - the
+// wheel keeps visibly moving all the way to the click, never dying early.
+// mode 0 = course wheel, land in place. mode 1 = course wheel from the cup list - the landing
+// drops into the course submenu with the rolled course selected (a random cup alone isn't a
+// random course). mode 2 = cup wheel, landing commits the GP slot machine (shuffled order,
+// straight into the race).
+static s32 sRouletteSpin = 0; // nonzero = the spin owns the screen's input
+static s32 sRouletteNext = 0; // ticks until the next visible hop
+static s32 sRouletteMode = 0;
+static s32 sRouletteHops = 0; // hops left; the final hop is the landing
+
+// One sequential wheel step across the selectable courses: battle hops the arenas of its one cup;
+// VS and Time Trials sweep every cup's four tracks, wrapping cup to cup.
+static void roulette_hop_course(void) {
+    s32 cup = gCupSelection;
+    s32 idx = gCourseIndexInCup + 1;
+    if (idx >= (s32) GetCupSize()) {
+        idx = 0;
+        if (gModeSelection != BATTLE) {
+            cup = (s32) WorldSetCupWrapped(GetCupIndex() + 1);
+        }
+    }
+    gCupSelection = cup;
+    gCourseIndexInCup = idx;
+    SetCupCursorPosition(idx);
+    TrackBrowser_SetTrackFromCup();
+    if (cup >= 0 && cup < 5) { // custom worlds can grow past gCupCourseOrder's 5 cups
+        gCurrentCourseId = gCupCourseOrder[cup][idx];
+    }
+}
+
+static void roulette_spin_start(s32 mode) {
+    u32 wheel;
+    u32 extra;
+    roulette_seed();
+    if (mode == 2) {
+        wheel = WorldCupCount();
+    } else {
+        wheel = (gModeSelection == BATTLE) ? (u32) GetCupSize() : WorldCupCount() * 4u;
+    }
+    if (wheel < 2) {
+        wheel = 2;
+    }
+    extra = roulette_rng_range(wheel);
+    if (extra == 0) { // landing exactly where you started reads as a dead button - one reroll
+        extra = roulette_rng_range(wheel);
+    }
+    // courses spin one full revolution plus the offset; the much smaller GP cup wheel gets two
+    sRouletteHops = (s32) (wheel * ((mode == 2) ? 2u : 1u) + extra);
+    sRouletteSpin = 1;
+    sRouletteNext = 0; // first hop on the next tick
+    sRouletteMode = mode;
+    reset_cycle_flash_menu();
+}
+
+static void roulette_spin_tick(void) {
+    if (--sRouletteNext > 0) {
+        return;
+    }
+    if (sRouletteMode == 2) {
+        sTempCupSelection = (s8) WorldSetCupWrapped(GetCupIndex() + 1);
+        D_800DC540 = GetCupIndex();
+        gCupSelection = (s32) GetCupIndex();
+        TrackBrowser_SetTrackFromCup();
+        gCurrentCourseId = cup_course_at(gCupSelection, gCourseIndexInCup);
+    } else {
+        roulette_hop_course();
+        if (sRouletteMode == 1) { // keep the cup screen's mirror state in step with the wheel
+            sTempCupSelection = (s8) GetCupIndex();
+            D_800DC540 = GetCupIndex();
+        }
+    }
+    reset_cycle_flash_menu();
+    if (--sRouletteHops <= 0) { // the landing is itself the last visible hop
+        sRouletteSpin = 0;
+        if (sRouletteMode == 1) {
+            // The cup-list spin lands a COURSE: drop into the course submenu with the rolled
+            // course under the cursor, ready for A to confirm.
+            gSubMenuSelection = (gModeSelection == BATTLE) ? SUB_MENU_MAP_SELECT_BATTLE_COURSE
+                                                           : SUB_MENU_MAP_SELECT_COURSE;
+            gMenuTimingCounter = 0;
+        }
+        if (sRouletteMode == 2) {
+            // The GP slot machine commit: the cup was synced during the hops, so the shuffle keys
+            // to the right cup; then the same transitions as A on the cup and A on OK.
+            roulette_shuffle_cup();
+            gSubMenuSelection = SUB_MENU_MAP_SELECT_OK;
+            SetCupCursorPosition(TRACK_ONE);
+            TrackBrowser_SetTrackFromCup();
+            gCurrentCourseId = cup_course_at(gCupSelection, TRACK_ONE);
+            gMenuTimingCounter = 0;
+            func_8009E1C0();
+            func_800CA330(0x19);
+        }
+        play_sound2(SOUND_MENU_OK_CLICKED);
+        return;
+    }
+    play_sound2(SOUND_MENU_CURSOR_MOVE);
+    // hop pace keyed to hops left: rapid while the wheel is loaded, stretching out into the landing
+    sRouletteNext = (sRouletteHops > 12) ? 2
+                    : (sRouletteHops > 8)  ? 3
+                    : (sRouletteHops > 5)  ? 4
+                    : (sRouletteHops > 3)  ? 6
+                    : (sRouletteHops > 1)  ? 9
+                                           : 12;
+}
+
 void course_select_menu_act(struct Controller* controller, u16 controllerIdx) {
     u16 btnAndStick = (controller->buttonPressed | controller->stickPressed);
+
+    // While the roulette is spinning it owns the screen: tick the animation, eat the input.
+    if (sRouletteSpin > 0) {
+        if (controllerIdx == PLAYER_ONE) {
+            roulette_spin_tick();
+        }
+        return;
+    }
 
     if ((!gEnableDebugMode) && ((btnAndStick & START_BUTTON) != 0)) {
         btnAndStick |= A_BUTTON;
@@ -1779,8 +2115,15 @@ void course_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                 }
 
                 D_800DC540 = GetCupIndex();
-                gCurrentCourseId = gCupCourseOrder[gCupSelection][gCourseIndexInCup];
+                gCurrentCourseId = cup_course_at(gCupSelection, gCourseIndexInCup);
                 TrackBrowser_SetTrackFromCup();
+                if ((btnAndStick & CONT_G) != 0) {
+                    // Z on the cup list: start the roulette spin. In GP the landing commits the full
+                    // slot machine (random cup, shuffled track order, straight into the race); in
+                    // other modes it just lands on a random cup.
+                    roulette_spin_start(gModeSelection == GRAND_PRIX ? 2 : 1);
+                    break;
+                }
                 if ((btnAndStick & B_BUTTON) != 0) {
                     func_8009E208();
                     play_sound2(SOUND_MENU_GO_BACK);
@@ -1789,11 +2132,12 @@ void course_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                         gSubMenuSelection = SUB_MENU_MAP_SELECT_COURSE;
                         play_sound2(SOUND_MENU_SELECT);
                     } else {
+                        roulette_reset_shuffle(); // a manual cup pick means the stock track order
                         gSubMenuSelection = SUB_MENU_MAP_SELECT_OK;
                         play_sound2(SOUND_MENU_SELECT);
                         SetCupCursorPosition(TRACK_ONE);
                         TrackBrowser_SetTrackFromCup();
-                        gCurrentCourseId = gCupCourseOrder[gCupSelection][TRACK_ONE];
+                        gCurrentCourseId = cup_course_at(gCupSelection, TRACK_ONE);
                         gMenuTimingCounter = 0;
                     }
                     reset_cycle_flash_menu();
@@ -1814,8 +2158,13 @@ void course_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                     play_sound2(SOUND_MENU_CURSOR_MOVE);
                 }
 
-                gCurrentCourseId = gCupCourseOrder[gCupSelection][gCourseIndexInCup];
+                gCurrentCourseId = cup_course_at(gCupSelection, gCourseIndexInCup);
                 TrackBrowser_SetTrackFromCup();
+                if ((btnAndStick & CONT_G) != 0) {
+                    // Z on the course list: spin the roulette across random courses, decelerating
+                    // to a landing (random arena in Battle).
+                    roulette_spin_start(0);
+                }
                 if ((btnAndStick & B_BUTTON) != 0) {
                     if (gSubMenuSelection == SUB_MENU_MAP_SELECT_COURSE) {
                         gSubMenuSelection = SUB_MENU_MAP_SELECT_CUP;
@@ -1857,6 +2206,16 @@ void course_select_menu_act(struct Controller* controller, u16 controllerIdx) {
                     return;
                 }
                 if ((btnAndStick & A_BUTTON) != 0) {
+                    // Port addition: the 1P VERSUS commit. The engine has no one-player versus
+                    // race (SCREEN_MODE_1P only spawns GP and TT), so the chosen course races on
+                    // the proven GP path as a duel: you against the rival picked on the character
+                    // screen, both culled onto the front row at spawn (race_mods.c). gVersusDuel
+                    // is the duel's own flag - the MODE row's gRaceMode stays untouched, so a
+                    // CUSTOM setup (balloons, hazards...) stacks onto the duel cleanly.
+                    if (gPlayerCount == 1 && gModeSelection == VERSUS) {
+                        gModeSelection = GRAND_PRIX;
+                        CVarSetInteger("gVersusDuel", 1);
+                    }
                     func_8009E1C0();
                     func_800CA330(0x19);
                     play_sound2(SOUND_MENU_OK_CLICKED);
@@ -2002,6 +2361,11 @@ void load_menu_states(s32 menuSelection) {
                         play_sequence(MUSIC_SEQ_MAIN_MENU);
                         for (i = 0; i < ARRAY_COUNT(gCharacterGridIsSelected); i++) {
                             gCharacterGridIsSelected[i] = false;
+                            if (i >= gPlayerCount) {
+                                // Port addition: a stale 1P VERSUS rival cursor would deadlock the
+                                // all-selected gate on a flow that can't lock it (Driver Change).
+                                gCharacterGridSelections[i] = 0;
+                            }
                         }
                     }
                     break;

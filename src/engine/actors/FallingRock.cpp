@@ -76,7 +76,11 @@ void AFallingRock::Tick() {
         RespawnTimer -= 1;
         return;
     }
-    if (Pos[1] < CM_GetWaterLevel(Pos, NULL)) {
+    // The rock's own collision context, never NULL: DKJungle/SherbetLand's GetWaterLevel
+    // overrides dereference it for the section id (witnessed: a hazard boulder on DK Jungle
+    // crashed the game at DKJungle::GetWaterLevel on the very first wave). Unk30 is inited in
+    // the ctor and refreshed by check_bounding_collision every tick below.
+    if (Pos[1] < CM_GetWaterLevel(Pos, &Unk30)) {
         AFallingRock::Reset();
     }
     Rot[0] += (s16) ((Velocity[2] * 5461.0f) / 20.0f);

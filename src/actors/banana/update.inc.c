@@ -1,3 +1,4 @@
+extern short vr_item_throw_yaw_offset(int isHumanPlayer); // port/vr - head-aimed throws in VR first person
 #include <actors.h>
 #include <code_800029B0.h>
 #include <defines.h>
@@ -72,7 +73,7 @@ void update_actor_banana(struct BananaActor* banana) {
                             temp_f0 = (player->speed * 0.75f) + 3.5f + pad3;
                         }
                         vec3f_set(someVelocity, 0, pad3, temp_f0);
-                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0);
+                        func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
                         banana->velocity[0] = someVelocity[0];
                         banana->velocity[1] = someVelocity[1];
                         banana->velocity[2] = someVelocity[2];
@@ -121,7 +122,7 @@ void update_actor_banana(struct BananaActor* banana) {
             someVelocity[0] = 0.0f;
             someVelocity[1] = 0.0f;
             someVelocity[2] = -5.0f;
-            func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0);
+            func_802B64C4(someVelocity, player->rotation[1] + player->unk_0C0 + vr_item_throw_yaw_offset((player->type & PLAYER_HUMAN) != 0));
             unkX = player->pos[0] + someVelocity[0];
             unkY = player->pos[1] + someVelocity[1];
             unkZ = player->pos[2] + someVelocity[2];

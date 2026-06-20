@@ -35,6 +35,9 @@ extern "C" {
     #include "memory.h"
     #include "course_offsets.h"
     extern const char *choco_mountain_dls[96];
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 ChocoMountain::ChocoMountain() {
@@ -160,9 +163,16 @@ void ChocoMountain::Load() {
 
 void ChocoMountain::BeginPlay() {
     spawn_all_item_boxes((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_choco_mountain_item_box_spawns));
-    SpawnActor<AFallingRock>(FVector(2019, 156, 164), 60);
-    SpawnActor<AFallingRock>(FVector(2018, 155, 379), 120);
-    SpawnActor<AFallingRock>(FVector(1996, 146, 505), 180);
+
+    // PROP SWAP: the rockslide takes the race off and race_mods spawns the chosen menagerie
+    // along the racing line instead.
+    if (race_mods_prop_swap_live()) {
+        race_mods_prop_swap_register(3);
+    } else {
+        SpawnActor<AFallingRock>(FVector(2019, 156, 164), 60);
+        SpawnActor<AFallingRock>(FVector(2018, 155, 379), 120);
+        SpawnActor<AFallingRock>(FVector(1996, 146, 505), 180);
+    }
 
     if (gModeSelection == VERSUS) {
         SpawnActor<OBombKart>(0, 140, 3, 0.8333333f);

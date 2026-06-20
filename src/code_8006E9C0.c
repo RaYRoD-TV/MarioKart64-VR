@@ -9,6 +9,7 @@
 #include "code_80005FD0.h"
 #include "code_80057C60.h"
 #include "code_8006E9C0.h"
+#include "race_mods.h"
 #include "code_80086E70.h"
 #include "update_objects.h"
 #include "objects.h"
@@ -433,7 +434,7 @@ void func_8006FA94(void) {
     gHUDDisable = D_8018D214;
     D_801657AE = gHUDDisable;
     D_8018D20C = 0;
-    D_8018D320 = 3;
+    D_8018D320 = race_mods_total_laps(); // the HUD's lap total: crossing-counter gate + lap fraction display
     D_8018D2AC = 0;
     D_8018D2BC = 0;
     D_8018D2B4 = D_8018D2BC;

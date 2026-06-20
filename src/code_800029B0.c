@@ -1,4 +1,5 @@
 #include <libultraship.h>
+#include <stdio.h>
 #include <macros.h>
 #include <mk64.h>
 #include <stubs.h>
@@ -202,7 +203,15 @@ void setup_race(void) {
         gTrackDirection = 1.0f;
     }
     if (gModeSelection == GRAND_PRIX) {
-        gCurrentCourseId = gCupCourseOrder[gCupSelection][gCourseIndexInCup];
+        gCurrentCourseId = cup_course_at(gCupSelection, gCourseIndexInCup); // honors the GP roulette shuffle
+        { // TEMP diag for the GP roulette order - remove once re-ordering is confirmed
+            FILE* df = fopen("roulette_diag.txt", "a");
+            if (df != NULL) {
+                fprintf(df, "advance: cup=%d idx=%d course=%d\n", gCupSelection, gCourseIndexInCup,
+                        gCurrentCourseId);
+                fclose(df);
+            }
+        }
         // Skip for debug menu
         if (gMenuSelection != START_MENU) {
             TrackBrowser_SetTrackFromCup();

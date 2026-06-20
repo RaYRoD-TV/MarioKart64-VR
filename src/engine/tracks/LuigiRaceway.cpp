@@ -300,6 +300,25 @@ void LuigiRaceway::Draw(ScreenContext* arg0) {
             currentScreenSection = 0;
         }
 
+        { // TEMP diag: does the captured frame the jumbotron reads actually have pixels in it?
+            static u32 sJumboDiag = 0;
+            if ((sJumboDiag++ % 150) == 0) {
+                const u16* px = (const u16*) gPortFramebuffers[prevFrame];
+                s32 nonZero = 0;
+                for (s32 k = 0; k < 320 * 240; k += 97) {
+                    if (px[k] != 0) {
+                        nonZero++;
+                    }
+                }
+                // Written to a file beside the exe so no console setup is needed to collect evidence.
+                FILE* df = fopen("jumbotron_diag.txt", "a");
+                if (df != NULL) {
+                    fprintf(df, "consumer: prevFrame=%d nonZeroSamples=%d/792\n", prevFrame, nonZero);
+                    fclose(df);
+                }
+            }
+        }
+
         /**
          * The jumbo television screen used to be split into six sections to fit into the n64's texture size
          * restrictions It isn't split into six sections anymore

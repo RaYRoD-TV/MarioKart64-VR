@@ -3,6 +3,10 @@
 #include <macros.h>
 #include "port/interpolation/FrameInterpolation.h"
 
+// race_mods.c: the treasure-hunt prize box renders giant so it reads as THE objective.
+extern int race_mods_treasure_actor_index(void);
+#define TREASURE_BOX_SCALE 2.5f
+
 /**
  * @brief Renders the item box actor.
  *
@@ -34,6 +38,11 @@ void render_actor_item_box(Camera* camera, struct ItemBox* item_box) {
     }
 
     u32 uniqueIdentifier = TAG_ITEM_ADDR((actorIdx << 4) | (camera - cameras));
+    // The hidden hunt (gTreasureHidden) keeps the prize at normal box size - a giant box off in
+    // the weeds would broadcast the very location the option exists to hide. The GOLD tint stays
+    // in both modes: when you DO lay eyes on it, it must read as treasure, not another item box.
+    s32 isTreasureBox = (race_mods_treasure_actor_index() == (s32) actorIdx);
+    s32 isTreasure = isTreasureBox && !CVarGetInteger("gTreasureHidden", 0);
 
     temp_f0 = is_within_render_distance(camera->pos, item_box->pos, camera->rot[1], 0.0f, camera->fieldOfView,
                                         4000000.0f);
@@ -51,6 +60,9 @@ void render_actor_item_box(Camera* camera, struct ItemBox* item_box) {
 
             FrameInterpolation_RecordOpenChild("itembox", uniqueIdentifier);
             mtxf_pos_rotation_xyz(someMatrix1, someVec2, someRot);
+            if (isTreasure) {
+                mtxf_scale(someMatrix1, TREASURE_BOX_SCALE);
+            }
 
             if (!render_set_position(someMatrix1, 0)) {
                 FrameInterpolation_RecordCloseChild();
@@ -66,6 +78,9 @@ void render_actor_item_box(Camera* camera, struct ItemBox* item_box) {
             someVec2[1] = item_box->pos[1];
 
             mtxf_pos_rotation_xyz(someMatrix1, someVec2, someRot);
+            if (isTreasure) {
+                mtxf_scale(someMatrix1, TREASURE_BOX_SCALE);
+            }
 
             if (!render_set_position(someMatrix1, 0)) {
                 FrameInterpolation_RecordCloseChild();
@@ -90,6 +105,9 @@ void render_actor_item_box(Camera* camera, struct ItemBox* item_box) {
         if (item_box->state != 3) {
             FrameInterpolation_RecordOpenChild("itembox4", uniqueIdentifier);
             mtxf_pos_rotation_xyz(someMatrix1, item_box->pos, item_box->rot);
+            if (isTreasure) {
+                mtxf_scale(someMatrix1, TREASURE_BOX_SCALE);
+            }
 
             if (!render_set_position(someMatrix1, 0)) {
                 FrameInterpolation_RecordCloseChild();
@@ -97,7 +115,16 @@ void render_actor_item_box(Camera* camera, struct ItemBox* item_box) {
             }
 
             gSPClearGeometryMode(gDisplayListHead++, G_LIGHTING);
-            gDPSetCombineMode(gDisplayListHead++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+            if (isTreasureBox) {
+                // The prize cube renders SOLID GOLD with a slow pulse instead of the stock
+                // rainbow shade. This combine swap only works because the cube's combiner is
+                // set HERE rather than inside the cube DL: same shape, SHADE -> PRIMITIVE.
+                s32 pulse = 215 + (s32) (40.0f * sins((u16) (gGlobalTimer * 1400)));
+                gDPSetCombineMode(gDisplayListHead++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
+                gDPSetPrimColor(gDisplayListHead++, 0, 0, 255, (u8) pulse, 40, 220);
+            } else {
+                gDPSetCombineMode(gDisplayListHead++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+            }
 
             /*
              * In the original game, the question mark texture would become corrupted. Thus, this code

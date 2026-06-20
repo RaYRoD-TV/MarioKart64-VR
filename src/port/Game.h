@@ -54,6 +54,11 @@ u32 WorldNextCup(void);
 
 u32 WorldPreviousCup(void);
 
+// The number of cups the browser can reach in the current mode (NextCup's own bound), and a
+// wrapping cup setter for the track roulette - NextCup saturates at the last cup, a wheel must not.
+u32 WorldCupCount(void);
+u32 WorldSetCupWrapped(u32 index);
+
 u32 GetCupIndex(void);
 
 const char* GetCupName(void);

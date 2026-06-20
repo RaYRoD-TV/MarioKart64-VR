@@ -69,31 +69,32 @@ void FB_CopyToFramebuffer(Gfx** gfxP, s32 fb_src, s32 fb_dest, u8 oncePerFrame, 
  * required if the buffer is being used as a texture in F3D.
  */
 void FB_WriteFramebufferSliceToCPU(Gfx** gfxP, void* buffer, u8 byteSwap) {
+    extern s32 GameEngine_GetVrEyeFb(void);
+    extern void GameEngine_SetFbCopyScaledTarget(s32 fbId, s32 dstW, s32 dstH);
     Gfx* gfx = *gfxP;
-    FB_CopyToFramebuffer(&gfx, 0, gReusableFrameBuffer, false, NULL);
-    
+    // In VR the game renders into the interpreter's eye framebuffer, not the window backbuffer
+    // this normally captures - read the eye fb there so the jumbotron screens keep working.
+    s32 srcFb = GameEngine_GetVrEyeFb();
+    if (srcFb < 0) {
+        srcFb = 0;
+    }
+    // The default copy is a 1:1 region copy sized to the render dims, which CLIPS whenever the
+    // internal render resolution exceeds the destination framebuffer - the jumbotron then sampled
+    // mostly dead space. The reusable fb is registered as a scaled-copy target instead: the whole
+    // source (render dims at execution time - per-eye sizes in VR, the internal render size on
+    // flat) lands in a fixed 320x240 region, and the sample below reads exactly that region.
+    // Sticky registration so VR's per-eye re-execution scales the copy in BOTH eyes.
+    GameEngine_SetFbCopyScaledTarget(gReusableFrameBuffer, SCREEN_WIDTH, SCREEN_HEIGHT);
+    FB_CopyToFramebuffer(&gfx, srcFb, gReusableFrameBuffer, false, NULL);
+
     // Set the N64 resolution framebuffer as the draw target (320x240)
     gsSPSetFB(gfx++, gN64ResFrameBuffer);
     // Reset scissor for new framebuffer
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-    int16_t s0 = 0, t0 = 0;
-    int16_t s1 = OTRGetGameRenderWidth();
-    int16_t t1 = OTRGetGameRenderHeight();
-    float aspectRatio = OTRGetAspectRatio();
-    float fourByThree = 4.0f / 3.0f;
-
-    // Adjust the texture coordinates so that only a 4:3 region from the center is drawn
-    // to the N64 resolution buffer. Currently ratios smaller than 4:3 will just stretch to fill.
-    if (aspectRatio > fourByThree) {
-        int16_t adjustedWidth = OTRGetGameRenderWidth() / (aspectRatio / fourByThree);
-        s0 = (OTRGetGameRenderWidth() - adjustedWidth) / 2;
-        s1 -= s0;
-    }
-
     gDPSetTextureImageFB(gfx++, 0, 0, 0, gReusableFrameBuffer);
-    gDPImageRectangle(gfx++, 0 << 2, 0 << 2, s0, t0, SCREEN_WIDTH << 2, SCREEN_HEIGHT << 2, s1, t1, G_TX_RENDERTILE,
-                      OTRGetGameRenderWidth(), OTRGetGameRenderHeight());
+    gDPImageRectangle(gfx++, 0 << 2, 0 << 2, 0, 0, SCREEN_WIDTH << 2, SCREEN_HEIGHT << 2, SCREEN_WIDTH,
+                      SCREEN_HEIGHT, G_TX_RENDERTILE, SCREEN_WIDTH, SCREEN_HEIGHT);
 
     // Read the final N64 framebuffer back as rgba16 into the CPU-side buffer
     gDPReadFB(gfx++, gN64ResFrameBuffer, buffer, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, byteSwap);

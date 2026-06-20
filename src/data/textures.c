@@ -4207,10 +4207,16 @@ MenuTexture seg2_game_select_texture[2] = {
  * @brief MenuTexture for the first colone one player
  *
  */
-MenuTexture seg2_menu_1p_column[4] = {
+MenuTexture seg2_menu_1p_column[6] = {
     { 1, texture_menu_1p_game, 64, 54, 0, 0, 0x0 },
     { 1, texture_mode_mario_gp, 64, 18, 0, 65, 0x0 },
     { 1, texture_mode_time_trials, 64, 18, 0, 83, 0x0 },
+    // Port addition: 1P gained VERSUS (third row slot). BATTLE is intentionally hidden for 1P -
+    // its row is a NULL terminator so render_menu_textures stops after VERSUS and never draws the
+    // battle label (the cursor is also capped before it via gPlayerModeSelection). The 2P/3P/4P
+    // columns keep their battle rows. Restore the battle entry below to bring 1P battle back.
+    { 1, texture_mode_vs, 64, 18, 0, 101, 0x0 },
+    { 0, NULL, 0, 0, 0, 0, 0 },
     { 0, NULL, 0, 0, 0, 0, 0 },
 };
 

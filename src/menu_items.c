@@ -10,6 +10,9 @@
 #include <assets/textures/texture_data_2.h>
 #include "code_800029B0.h"
 #include "menu_items.h"
+#include "vr_pause_menu.h"
+#include "quit_menu.h"
+#include "race_mods_menu.h"
 #include "code_80005FD0.h"
 #include "code_8006E9C0.h"
 #include "menus.h"
@@ -5816,17 +5819,19 @@ void func_8009E2F0(s32 arg0) {
         temp_t1 = &D_8018E7E8[arg0];
         temp_t0 = &D_8018E810[arg0];
         temp_v0 = &D_800E7AC8[temp_t7];
+        // The thunder flash at full alpha strobes the whole screen - brutal on a headset. Toned to
+        // under half strength; the timing and color ramp stay stock so it still reads as lightning.
         if ((u32) D_8018E840[arg0] < 0x1BU) {
             gDisplayListHead =
                 draw_box_fill_wide(gDisplayListHead, temp_t1->x - (temp_t0->x / 2), temp_t1->y - (temp_t0->y / 2),
                                    temp_t1->x + (temp_t0->x / 2), temp_t1->y + (temp_t0->y / 2), temp_v0->red,
-                                   temp_v0->green, temp_v0->blue, temp_v0->alpha);
+                                   temp_v0->green, temp_v0->blue, (temp_v0->alpha * 45) / 100);
         } else {
             temp_t7_2 = ((u32) (38 - D_8018E840[arg0])) / 11.0;
             gDisplayListHead =
                 draw_box_fill_wide(gDisplayListHead, temp_t1->x - (temp_t0->x / 2), temp_t1->y - (temp_t0->y / 2),
                                    temp_t1->x + (temp_t0->x / 2), temp_t1->y + (temp_t0->y / 2), temp_v0->red,
-                                   temp_v0->green, temp_v0->blue, (u32) (temp_v0->alpha * temp_t7_2));
+                                   temp_v0->green, temp_v0->blue, (u32) ((temp_v0->alpha * 45 / 100) * temp_t7_2));
         }
     }
     D_8018E840[arg0]++;
@@ -6164,11 +6169,11 @@ void add_menu_item(s32 type, s32 column, s32 row, s8 priority) {
         case MENU_ITEM_TYPE_08B:
             temp_v0_6 = var_ra->type - MENU_ITEM_TYPE_07C;
             load_menu_img_comp_type(
-                 D_800E7D74[gCupCourseOrder[temp_v0_6 / 4][temp_v0_6 % 4]],
+                 D_800E7D74[cup_course_at(temp_v0_6 / 4, temp_v0_6 % 4)],
                 LOAD_MENU_IMG_MIO0_ONCE);
             temp_v0_6 = var_ra->type - MENU_ITEM_TYPE_07C;
             load_menu_img_comp_type(
-                D_800E7DC4[gCupCourseOrder[temp_v0_6 / 4][temp_v0_6 % 4]],
+                D_800E7DC4[cup_course_at(temp_v0_6 / 4, temp_v0_6 % 4)],
                 LOAD_MENU_IMG_TKMK00_ONCE);
             load_menu_img_comp_type(D_02004A0C, LOAD_MENU_IMG_TKMK00_ONCE);
             break;
@@ -6486,6 +6491,7 @@ void render_menus(MenuItem* arg0) {
                     draw_version();
                     draw_debug();
                 }
+                quit_menu_draw_box(); // port addition: bottom-row QUIT box (GAME_SELECT only exists on MAIN_MENU)
                 break;
             case MENU_ITEM_UI_1P_GAME:
             case MENU_ITEM_UI_2P_GAME:
@@ -7199,7 +7205,7 @@ void func_800A1500(MenuItem* arg0) {
 }
 
 void func_800A15EC(MenuItem* arg0) {
-    s16 trackId = gCupCourseOrder[(arg0->type - 0x7C) / 4][(arg0->type - 0x7C) % 4];
+    s16 trackId = cup_course_at((arg0->type - 0x7C) / 4, (arg0->type - 0x7C) % 4);
     gDisplayListHead =
          func_8009C204(gDisplayListHead, D_800E7D74[trackId], arg0->column, arg0->row, 2);
     gDisplayListHead = draw_box(gDisplayListHead, arg0->column, arg0->row + 0x27, arg0->column + 0x40, arg0->row + 0x30,
@@ -8193,20 +8199,29 @@ void render_menu_item_announce_ghost(MenuItem* arg0) {
 
 void render_pause_menu(MenuItem* arg0) {
     if (gIsGamePaused != 0) {
-        switch (gModeSelection) {
-            case TIME_TRIALS:
-                render_pause_menu_time_trials(arg0);
-                break;
-            case VERSUS:
-                render_pause_menu_versus(arg0);
-                break;
-            case GRAND_PRIX:
-                render_pause_grand_prix(arg0);
-                break;
-            case BATTLE:
-                render_pause_battle(arg0);
-                break;
+        // VR: while our VR options overlay is open it REPLACES the stock pause menu - skip the stock render so
+        // its background/options don't show behind ours.
+        if (!vr_pause_menu_is_open()) {
+            switch (gModeSelection) {
+                case TIME_TRIALS:
+                    render_pause_menu_time_trials(arg0);
+                    break;
+                case VERSUS:
+                    render_pause_menu_versus(arg0);
+                    break;
+                case GRAND_PRIX:
+                    render_pause_grand_prix(arg0);
+                    break;
+                case BATTLE:
+                    render_pause_battle(arg0);
+                    break;
+            }
+            // The R1 overlay (view modes + race actions) works on flatscreen too now - say so,
+            // or nobody ever finds it without a headset.
+            set_text_color(TEXT_BLUE);
+            race_mods_text_fit_center(160, 226, "R VIEW OPTIONS", 0.48f, 272.0f);
         }
+        vr_pause_menu_draw(); // VR: draw our VR options overlay (no-op when closed; replaces the stock menu when open)
     }
 }
 
@@ -8317,14 +8332,12 @@ void render_pause_menu_versus(MenuItem* arg0) {
 void render_pause_grand_prix(MenuItem* arg0) {
     s32 temp_t0;
     s32 temp_v1;
-    s32 temp_s0;
-    s32 temp_s1;
     s32 temp_t3;
     s32 temp_t4;
     s32 var_s0;
     Unk_D_800E70A0* temp_s3;
     ScreenContext* temp_v0;
-    f32 one = 1.0f;
+    char title[64];
 
     temp_v0 = &gScreenContexts[gIsGamePaused - 1];
     temp_v1 = temp_v0->screenStartX;
@@ -8352,14 +8365,15 @@ void render_pause_grand_prix(MenuItem* arg0) {
     }
 
     temp_s3 = &D_800E85C0[(gScreenModeSelection * 4) + (gIsGamePaused - 1)];
-    temp_s0 = ((get_string_width(gCupNames[GetCupIndex()]) * one) + 10.0f) / 2;
-    temp_s1 = ((get_string_width(D_800E76CC[gCCSelection]) * one) + 10.0f) / 2;
+    // One combined, fit-capped title line. The stock layout centered "<CUP>" and "<CC>" as a
+    // pair using get_string_width, which underreports HD font art (it renders ~1.5x the metric
+    // extent) - the CC tail ran off the right screen edge. The fit helpers measure the TRUE
+    // rendered extent and shrink to fit (the race_mods_menu.c invariant for all menu text).
+    sprintf(title, "%s %s", gCupNames[GetCupIndex()], D_800E76CC[gCCSelection]);
     set_text_color(TEXT_YELLOW);
-    print_text1_center_mode_1(160 - temp_s1, temp_s3->row - 50, gCupNames[GetCupIndex()], 0, 1.0f, 1.0f);
+    race_mods_text_fit_center(160, temp_s3->row - 50, title, 1.0f, 285.0f);
     set_text_color(TEXT_YELLOW);
-    print_text1_center_mode_1(160 + temp_s0, temp_s3->row - 50, D_800E76CC[gCCSelection], 0, 1.0f, 1.0f);
-    set_text_color(TEXT_YELLOW);
-    print_text1_center_mode_1(160, temp_s3->row - 30, CM_GetProps()->Name, 0, 1.0f, 1.0f);
+    race_mods_text_fit_center(160, temp_s3->row - 30, CM_GetProps()->Name, 1.0f, 285.0f);
     for (var_s0 = 0; var_s0 < 2; var_s0++) {
         text_rainbow_effect(arg0->state - 31, var_s0, TEXT_YELLOW);
         print_text_mode_1(temp_s3->column, temp_s3->row + (var_s0 * 13), gTextPauseButton[var_s0 * 4], 0, 0.75f, 0.75f);
@@ -8742,6 +8756,12 @@ void pause_menu_item_box_cursor(MenuItem* arg0, Unk_D_800E70A0* arg1) {
     f32 tmp;
     static float x2, y2, z2;
     static float x1, y1, z1;
+
+    // VR: hide the stock pause cursor while our VR options overlay is up (it's a 3D box that otherwise pokes
+    // through our flat menu). Return BEFORE RecordOpenChild so the frame-interpolation pairing stays balanced.
+    if (vr_pause_menu_is_open()) {
+        return;
+    }
 
     FrameInterpolation_RecordOpenChild("pause_menu_item_box", TAG_OBJECT(arg0));
     mtx = GetEffectMatrix();
@@ -9189,6 +9209,7 @@ void handle_menus_with_pri_arg(s32 priSpecial) {
                 break;
             case MENU_ITEM_UI_GAME_SELECT:
                 func_800AA280(menuItem);
+                quit_menu_update(); // port addition: single GAME_SELECT item = once per frame on the main menu
                 break;
             case MAIN_MENU_OPTION_GFX:
             case MAIN_MENU_DATA_GFX:
@@ -9521,6 +9542,16 @@ void handle_menus_with_pri_arg(s32 priSpecial) {
                 render_menus(menuItem);
             }
         }
+    }
+
+    if (priSpecial == 0) {
+        if (gMenuSelection == COURSE_SELECT_MENU) {
+            track_roulette_draw_hint(); // Z reroll / GP shuffle hint
+        }
+        custom_cc_draw_row();     // port additions: after every menu item so the overlays sit on top
+        versus_1p_rival_hint();   // 1P VERSUS character-screen guidance
+        quit_menu_draw_confirm();
+        race_mods_draw();
     }
 }
 
@@ -12132,6 +12163,30 @@ void func_800ADF48(MenuItem* arg0) {
     struct Controller* controller;
 
     if (gIsGamePaused != 0) {
+        // VR: R1 opens our native VR options overlay over the pause menu. While it's up it takes the input,
+        // so skip the stock pause-menu navigation. Restart(2)/Quit(3) selected in it run the SAME transition
+        // the stock pause menu uses (flags + state 0x1F + screen-Y reset + fade), so the race clears properly.
+        s32 vrAct = vr_pause_menu_input();
+        if (vrAct >= 2 && vrAct <= 6) {
+            // Restart(2)/Quit(3)/Course Select(4)/Driver Select(5)/Race Setup(6): the funcs set
+            // gGotoMode + the quit-to-menu transition; we MUST UNPAUSE (gIsGamePaused=0) so the
+            // race loop actually processes it - keeping it paused stalled the reset (the old
+            // state=0x1F / D_8015F894 path was the results-screen flow, a dead end here).
+            // Course/Driver Select reuse the stock pause menu's own Course/Driver Change
+            // transitions; Race Setup quits to the main menu and arms the setup-screen reopen.
+            if (vrAct == 2)      { D_8015F890 = 0; D_8015F892 = 1; func_802903B0(); } // restart
+            else if (vrAct == 3) { func_80290338(); }                                 // quit to menu
+            else if (vrAct == 4) { func_80290388(); }                                 // course select
+            else if (vrAct == 5) { func_80290360(); }                                 // character select
+            else                 { func_80290338(); race_mods_request_reopen(); }      // back to setup
+            gIsGamePaused = 0;
+            func_8028DF38(); // restore saved controller state (no input ghosting)
+            arg0->state = 0; // reset the pause-menu state for next pause
+            return;
+        }
+        if (vrAct != 0) {
+            return;
+        }
         switch (arg0->state) {
             case 0:
                 arg0->state = D_800F0B50[gModeSelection];

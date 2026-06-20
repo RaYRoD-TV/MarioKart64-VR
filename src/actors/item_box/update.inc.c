@@ -64,5 +64,16 @@ void update_actor_item_box(struct ItemBox* itemBox) {
                 itemBox->rot[2] += 0x16C;
             }
             break;
+        case 6: // item rain: tumbling down out of the sky, then settle at the normal float height
+            itemBox->rot[0] += 0x2D8;
+            itemBox->rot[1] -= 0x444;
+            itemBox->rot[2] += 0x16C;
+            itemBox->pos[1] -= 6.0f;
+            if (itemBox->pos[1] <= itemBox->origY + 8.66f) {
+                itemBox->pos[1] = itemBox->origY + 8.66f;
+                itemBox->state = 2;
+                itemBox->flags = 0xC000;
+            }
+            break;
     }
 }

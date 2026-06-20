@@ -164,7 +164,115 @@ void RaceManager::SetItemTables() {
     printf("[RaceManager] Selected cpu item probability table %s\n", cpuTableName.value_or("none").c_str());
 }
 
+extern "C" uint16_t random_int(uint16_t); // racing/math_util.h - returns 0..arg inclusive
+
+// Item modes from the race setup screen (src/race_mods_menu.c), all gated by gItemModeCPU for CPU rolls.
+// gItemMode: 0 = stock weighted tables, 1 = truly random (uniform over every stock item, ignores rank),
+// 2 = everyone draws the same chosen item, 3 = frantic (power items only), 4 = triples (stock roll, then
+// every item upgrades to its triple variant), 5 = inverted (stock tables with the rank flipped - the
+// leader draws last-place luck and vice versa).
+static bool RaceModsApplies(bool isCpu) {
+    if (CVarGetInteger("gItemMode", 0) == 0) {
+        return false;
+    }
+    return !isCpu || CVarGetInteger("gItemModeCPU", 1) != 0;
+}
+
+// Full-replacement modes (1-3). Returns -1 when the table roll should run instead.
+static int16_t RaceModsItemOverride(bool isCpu) {
+    if (!RaceModsApplies(isCpu)) {
+        return -1;
+    }
+    switch (CVarGetInteger("gItemMode", 0)) {
+        case 1: {
+            // A pure uniform across the complete item table: every item, equal odds, every pull,
+            // rank ignored - with one exception. A flat 1-in-15 lightning rate across eight karts
+            // means someone bolts the field every few seconds, so a bolt result keeps only 1 roll
+            // in 8 and the reroll picks from the other 14 items. Net bolt rate: about 1 box in 120.
+            int16_t item = (int16_t) (1 + random_int(ITEM_MAX - 2));
+            if (item == ITEM_THUNDERBOLT && random_int(7) != 0) {
+                item = (int16_t) (1 + random_int(ITEM_MAX - 3));
+                if (item >= ITEM_THUNDERBOLT) {
+                    item++;
+                }
+            }
+            return item;
+        }
+        case 2: {
+            int32_t item = CVarGetInteger("gItemModeItem", ITEM_BANANA);
+            if (item > ITEM_NONE && item < ITEM_MAX) {
+                return (int16_t) item;
+            }
+            return -1;
+        }
+        case 3: {
+            // Pure chaos: only the heavy hitters, with the blue shell and lightning showing up twice
+            // as often as the rest.
+            static const uint8_t kFrantic[] = { ITEM_TRIPLE_RED_SHELL, ITEM_BLUE_SPINY_SHELL,
+                                                ITEM_BLUE_SPINY_SHELL, ITEM_THUNDERBOLT,
+                                                ITEM_THUNDERBOLT,      ITEM_STAR,
+                                                ITEM_SUPER_MUSHROOM,   ITEM_TRIPLE_MUSHROOM };
+            return (int16_t) kFrantic[random_int(7)];
+        }
+    }
+    return -1;
+}
+
+// Mode 5 (inverted) flips the rank fed to the stock tables.
+static uint32_t RaceModsAdjustRank(uint32_t rank, bool isCpu) {
+    if (RaceModsApplies(isCpu) && CVarGetInteger("gItemMode", 0) == 5 && rank < NUM_PLAYERS) {
+        return (NUM_PLAYERS - 1) - rank;
+    }
+    return rank;
+}
+
+// Mode 4 (triples) upgrades a stock roll to the triple variant where one exists.
+static int16_t RaceModsPostRoll(int16_t item, bool isCpu) {
+    if (RaceModsApplies(isCpu) && CVarGetInteger("gItemMode", 0) == 4) {
+        int16_t upgraded = item;
+        switch (item) {
+            case ITEM_BANANA:
+                upgraded = ITEM_BANANA_BUNCH;
+                break;
+            case ITEM_GREEN_SHELL:
+                upgraded = ITEM_TRIPLE_GREEN_SHELL;
+                break;
+            case ITEM_RED_SHELL:
+                upgraded = ITEM_TRIPLE_RED_SHELL;
+                break;
+            case ITEM_MUSHROOM:
+            case ITEM_DOUBLE_MUSHROOM:
+                upgraded = ITEM_TRIPLE_MUSHROOM;
+                break;
+        }
+        printf("[RaceMods] triples roll: %d -> %d (cpu=%d)\n", item, upgraded, isCpu ? 1 : 0); // TEMP diag
+        return upgraded;
+    }
+    return item;
+}
+
+// Infected mode (gRaceMode 5): the blue shell and lightning hit the leader or the whole field
+// regardless of position - unfair in a mode decided by contact chases (the community pitch that
+// shaped this mode called both out). They remap to strong but aimed items. Runs on EVERY roll
+// path, item modes included.
+static int16_t InfectedModeFilter(int16_t item) {
+    if (CVarGetInteger("gRaceMode", 0) == 5) {
+        if (item == ITEM_BLUE_SPINY_SHELL) {
+            return ITEM_TRIPLE_RED_SHELL;
+        }
+        if (item == ITEM_THUNDERBOLT) {
+            return ITEM_SUPER_MUSHROOM;
+        }
+    }
+    return item;
+}
+
 extern "C" int16_t RaceManager_GetRandomHumanItem(uint32_t rank) {
+    int16_t forced = RaceModsItemOverride(false);
+    if (forced >= 0) {
+        return InfectedModeFilter(forced);
+    }
+
     auto& raceManager = GetWorld()->GetRaceManager();
 
     auto* table = raceManager.GetHumanItemTable();
@@ -173,10 +281,15 @@ extern "C" int16_t RaceManager_GetRandomHumanItem(uint32_t rank) {
         return ITEM_NONE;
     }
 
-    return table->Roll(rank);
+    return InfectedModeFilter(RaceModsPostRoll(table->Roll(RaceModsAdjustRank(rank, false)), false));
 }
 
 extern "C" int16_t RaceManager_GetRandomCPUItem(uint32_t rank) {
+    int16_t forced = RaceModsItemOverride(true);
+    if (forced >= 0) {
+        return InfectedModeFilter(forced);
+    }
+
     auto& raceManager = GetWorld()->GetRaceManager();
     auto* table = raceManager.GetCPUItemTable();
     if (nullptr == table) {
@@ -184,5 +297,5 @@ extern "C" int16_t RaceManager_GetRandomCPUItem(uint32_t rank) {
         return ITEM_NONE;
     }
 
-    return table->Roll(rank);
+    return InfectedModeFilter(RaceModsPostRoll(table->Roll(RaceModsAdjustRank(rank, true)), true));
 }

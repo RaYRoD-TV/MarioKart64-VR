@@ -30,6 +30,7 @@
 #include "menu_items.h"
 #include "collision.h"
 #include "main.h"
+#include "race_mods.h"
 #include "menus.h"
 #include "code_80086E70.h"
 #include "code_800029B0.h"
@@ -298,6 +299,9 @@ void func_80044DA0(u8* image, s32 width, s32 height) {
     // gDPLoadTextureBlock_4b(gDisplayListHead++, image, G_IM_FMT_I, width, height, 0, G_TX_NOMIRROR | G_TX_CLAMP,
     // G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
 
+    if (image == NULL || width < 16 || height <= 0) {
+        return; // the gDPLoadBlock dxt term divides by width/16 - widths under 16 divide by zero
+    }
     gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_I, G_IM_SIZ_16b, 1, image);
     gDPSetTile(gDisplayListHead++, G_IM_FMT_I, G_IM_SIZ_16b, 0, G_TX_RENDERTILE, G_TX_LOADTILE, 0,
                G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK,
@@ -321,6 +325,9 @@ void func_80044F34(u8* image, s32 width, s32 height) {
     // gDPLoadTextureBlock_4b(gDisplayListHead++, image, G_IM_FMT_I, width, height, 0, G_TX_NOMIRROR | G_TX_CLAMP,
     // G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
 
+    if (image == NULL || width < 16 || height <= 0) {
+        return; // the gDPLoadBlock dxt term divides by width/16 - widths under 16 divide by zero
+    }
     gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_I, G_IM_SIZ_16b, 1, image);
     gDPSetTile(gDisplayListHead++, G_IM_FMT_I, G_IM_SIZ_16b, 0, G_TX_RENDERTILE, G_TX_LOADTILE, 0,
                G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK,
@@ -1622,8 +1629,13 @@ void render_texture_rectangle_wide(s32 x, s32 y, s32 width, s32 height, s32 arg4
             case SCREEN_MODE_3P_4P_SPLITSCREEN:
             case SCREEN_MODE_2P_SPLITSCREEN_HORIZONTAL:
                 if ((xl - (width / 2)) < (SCREEN_WIDTH / 2)) {
+                    // BOTH coords ride the same edge remap, or the rect's width warps: with only
+                    // xl remapped, a left-anchored 8px glyph spanned from the widescreen edge to
+                    // the raw logical xh - the lap digits smeared the whole digit strip across a
+                    // third of the screen. A no-op in 4:3 (the remap offset is zero there), which
+                    // is how the asymmetry survived this long.
                     coordX = (s32) OTRGetDimensionFromLeftEdge(xl) << 2;
-                    coordX2 = (s32) (xh) << 2;
+                    coordX2 = (s32) OTRGetDimensionFromLeftEdge(xh) << 2;
                 } else {
                     coordX = (s32) OTRGetDimensionFromRightEdge(xl) << 2;
                     coordX2 = (s32) OTRGetDimensionFromRightEdge(xh) << 2;
@@ -2598,6 +2610,18 @@ UNUSED void func_8004E604(s32 arg0, s32 arg1, u8* tlut, u8* texture) {
     func_8004E240(arg0, arg1, tlut, texture, SCREEN_WIDTH, SCREEN_HEIGHT, 6);
 }
 
+// An item window must point at a real item icon before we hand its texture to the texrect path.
+// A corrupted state - a stale/out-of-range textureListIndex (e.g. an item-steal that copied a
+// non-item value into it) - makes func_80073514 publish activeTexture = textureList[index] from
+// PAST the 16-entry icon array, i.e. a garbage pointer that the texture load then dereferences and
+// crashes on (observed: a wild ~0xB7000000 texture address). textureListIndex is an s8 item id, so
+// the unsigned compare rejects both negative values and anything >= ITEM_MAX; the null checks cover
+// a window that was reset but not yet republished.
+static s32 item_window_drawable(const Object* object) {
+    return (u32) (s32) object->textureListIndex < (u32) ITEM_MAX && object->activeTexture != NULL &&
+           object->activeTLUT != NULL;
+}
+
 void draw_item_window(s32 playerId) {
     s32 objectIndex;
     Object* object;
@@ -2605,7 +2629,7 @@ void draw_item_window(s32 playerId) {
 
     objectIndex = gItemWindowObjectByPlayerId[playerId];
     object = &gObjectList[objectIndex];
-    if (object->state >= 2) {
+    if (object->state >= 2 && item_window_drawable(object)) {
         temp_v0 = &playerHUD[playerId];
         func_8004E4CC(temp_v0->slideItemBoxX + temp_v0->itemBoxX, temp_v0->slideItemBoxY + temp_v0->itemBoxY,
                       (u8*) object->activeTLUT, object->activeTexture);
@@ -2619,7 +2643,7 @@ void func_8004E6C4(s32 playerId) {
 
     objectIndex = gItemWindowObjectByPlayerId[playerId];
     object = &gObjectList[objectIndex];
-    if (object->state >= 2) {
+    if (object->state >= 2 && item_window_drawable(object)) {
         temp_v0 = &playerHUD[playerId];
         FrameInterpolation_RecordOpenChild("item_window_splitscreen", playerId);
         func_80047910(temp_v0->slideItemBoxX + temp_v0->itemBoxX, temp_v0->slideItemBoxY + temp_v0->itemBoxY, 0U,
@@ -2629,17 +2653,79 @@ void func_8004E6C4(s32 playerId) {
     }
 }
 
+// Draws a vanilla-style lap fraction for races past 3 laps, glyph by glyph from the timer's
+// digit strip - the same load+texrect path print_timer uses, so HD texture packs replace the
+// art cleanly. (The previous version CPU-composited the glyphs into a private 32x16 texture by
+// reading the strip's raw pixels at the stock 104x16 layout - the moment an HD pack swapped the
+// strip, the stride assumptions broke and the infinity rendered as garbage bars.) A no-limit
+// race (total past 9) draws "lap/oo": the infinity is two zeros overlapped by half, merged by
+// the alpha-compare threshold, since the strip has no real infinity glyph.
+void draw_lap_fraction_digits(s32 x, s32 y, s32 lap, s32 total) {
+    s32 current = lap + 1;
+    s32 ox = 0;
+
+    if (total <= 9 && current > total) {
+        current = total;
+    }
+    if (current > 99) {
+        current = 99;
+    }
+    gSPDisplayList(gDisplayListHead++, D_0D008108);
+    gSPDisplayList(gDisplayListHead++, D_0D007EF8);
+    gDPSetAlphaCompare(gDisplayListHead++, G_AC_THRESHOLD);
+    load_texture_block_rgba16_mirror((u8*) common_texture_hud_normal_digit, 104, 16); // digit d at x = d*8
+    if (total > 9) {
+        // No limit: "lap/oo" - a two-digit lap shifts the slash and infinity right.
+        if (current > 9) {
+            func_8004BA98_wide(x, y, 8, 16, (current / 10) * 8, 0, 0);
+            func_8004BA98_wide(x + 8, y, 8, 16, (current % 10) * 8, 0, 0);
+            ox = 7;
+        } else {
+            func_8004BA98_wide(x, y, 8, 16, current * 8, 0, 0);
+        }
+        func_8004BA98_wide(x + ox + 18, y, 8, 16, 0, 0, 0);
+        func_8004BA98_wide(x + ox + 23, y, 8, 16, 0, 0, 0);
+        load_texture_block_rgba16_mirror((u8*) common_texture_hud_123, 32, 8); // the / at x = 24
+        func_8004BA98_wide(x + ox + 9, y + 4, 8, 8, 24, 0, 0);
+    } else {
+        func_8004BA98_wide(x + 2, y, 8, 16, current * 8, 0, 0);
+        func_8004BA98_wide(x + 22, y, 8, 16, total * 8, 0, 0);
+        load_texture_block_rgba16_mirror((u8*) common_texture_hud_123, 32, 8);
+        func_8004BA98_wide(x + 12, y + 4, 8, 8, 24, 0, 0);
+    }
+    gSPDisplayList(gDisplayListHead++, D_0D007EB8);
+}
+
 void draw_simplified_lap_count(s32 playerId) {
+    s32 total = race_mods_total_laps();
+    // NO LIMIT races (the 100 sentinel): a forced match end (balloon elimination, treasure
+    // find, infected verdict) stages the lap counter through 99/100 to fire the engine's real
+    // finish flow - that number is plumbing, not progress. Hide the readout once it happens
+    // instead of flashing LAP 99 at the player.
+    if (total == 100 && playerHUD[playerId].alsoLapCount >= total - 1) {
+        return;
+    }
     draw_hud_2d_texture_32x8((s32) playerHUD[playerId].lapX, playerHUD[playerId].lapY + 3,
                              (u8*) common_texture_hud_lap);
-    draw_hud_2d_texture_32x16(playerHUD[playerId].lapX + 0x1C, (s32) playerHUD[playerId].lapY,
-                              (u8*) gHudLapTextures[playerHUD[playerId].alsoLapCount]);
+    // gHudLapTextures are baked "1/3 2/3 3/3" art - the /3 is part of the image, so it's only right
+    // for a stock three-lap race. ANY other total (1, 2, or 4+) draws from the digit strip instead,
+    // which composes the real "current/total"; otherwise a 1- or 2-lap race read as "n/3".
+    if (total == 3) {
+        draw_hud_2d_texture_32x16(playerHUD[playerId].lapX + 0x1C, (s32) playerHUD[playerId].lapY,
+                                  (u8*) gHudLapTextures[playerHUD[playerId].alsoLapCount]);
+    } else {
+        draw_lap_fraction_digits(playerHUD[playerId].lapX + 0x1C, playerHUD[playerId].lapY,
+                                 playerHUD[playerId].alsoLapCount, total);
+    }
 }
 
 void func_8004E800(s32 playerId) {
+    if (race_mods_hide_place_hud()) {
+        return; // one-winner modes: no place graphic, in-race or at the finish
+    }
     FrameInterpolation_RecordOpenChild("Player place HUD", playerId);
     if (playerHUD[playerId].unk_81 != 0) {
-        if (playerHUD[playerId].lapCount != 3) {
+        if (playerHUD[playerId].lapCount != race_mods_total_laps()) {
             func_8004A384(playerHUD[playerId].rankX + playerHUD[playerId].slideRankX,
                           playerHUD[playerId].rankY + playerHUD[playerId].slideRankY, 0U,
                           playerHUD[playerId].rankScaling, 0x000000FF, D_800E55F8[D_8018CF98[playerId]], 0, 0x000000FF,
@@ -2659,7 +2745,7 @@ void func_8004E800(s32 playerId) {
 void func_8004E998(s32 playerId) {
     if (playerHUD[playerId].unk_81 != 0) {
         FrameInterpolation_RecordOpenChild("Player place HUD2", playerId);
-        if (playerHUD[playerId].lapCount != 3) {
+        if (playerHUD[playerId].lapCount != race_mods_total_laps()) {
             func_8004A384(playerHUD[playerId].rankX + playerHUD[playerId].slideRankX,
                           playerHUD[playerId].rankY + playerHUD[playerId].slideRankY, 0U,
                           playerHUD[playerId].rankScaling, 0x000000FF,
@@ -2694,19 +2780,26 @@ void func_8004EB38(s32 playerId) {
                       (u8*) common_texture_hud_time, 0x00000020, 0x00000010, 0x00000020, 0x00000010);
         func_8004F950((s32) temp_s0->lap2CompletionTimeX, (s32) temp_s0->timerY, 0x00000050, (s32) temp_s0->someTimer);
     }
+    // The slide-in after-images of the lap counter only have baked x/3 fraction art; with any lap
+    // total OTHER than 3 the fraction part is skipped (the real counter shows the right numbers), so
+    // there is no flash of "1/3" at race start.
     if ((u8) temp_s0->unk_7E != 0) {
         func_8004C9D8_wide((s32) temp_s0->lapAfterImage1X, temp_s0->lapY + 3, 0x00000080, (u8*) common_texture_hud_lap,
                            0x00000020, 8, 0x00000020, 8);
-        func_8004C9D8_wide(temp_s0->lapAfterImage1X + 0x1C, (s32) temp_s0->lapY, 0x00000080,
-                           (u8*) gHudLapTextures[temp_s0->alsoLapCount], 0x00000020, 0x00000010, 0x00000020,
-                           0x00000010);
+        if (race_mods_total_laps() == 3) {
+            func_8004C9D8_wide(temp_s0->lapAfterImage1X + 0x1C, (s32) temp_s0->lapY, 0x00000080,
+                               (u8*) gHudLapTextures[temp_s0->alsoLapCount], 0x00000020, 0x00000010, 0x00000020,
+                               0x00000010);
+        }
     }
     if ((u8) temp_s0->unk_7F != 0) {
         func_8004C9D8_wide((s32) temp_s0->lapAfterImage2X, temp_s0->lapY + 3, 0x00000050, (u8*) common_texture_hud_lap,
                            0x00000020, 8, 0x00000020, 8);
-        func_8004C9D8_wide(temp_s0->lapAfterImage2X + 0x1C, (s32) temp_s0->lapY, 0x00000050,
-                           (u8*) gHudLapTextures[temp_s0->alsoLapCount], 0x00000020, 0x00000010, 0x00000020,
-                           0x00000010);
+        if (race_mods_total_laps() == 3) {
+            func_8004C9D8_wide(temp_s0->lapAfterImage2X + 0x1C, (s32) temp_s0->lapY, 0x00000050,
+                               (u8*) gHudLapTextures[temp_s0->alsoLapCount], 0x00000020, 0x00000010, 0x00000020,
+                               0x00000010);
+        }
     }
 }
 
@@ -2876,7 +2969,9 @@ void func_8004F3E4(s32 arg0) {
             }
             for (idx = D_8018D158 - 1; idx >= 0; idx--) {
                 playerId = gGPCurrentRacePlayerIdByRank[idx];
-                if (((gPlayerOne + playerId)->type & PLAYER_CPU) != PLAYER_CPU) {
+                // The EXISTS check keeps the duel's culled seats (type zeroed, so not CPU either)
+                // from leaving ghost dots parked on the start grid.
+                if (race_mods_player_exists(playerId) && ((gPlayerOne + playerId)->type & PLAYER_CPU) != PLAYER_CPU) {
                     draw_minimap_character(arg0, playerId, (gPlayerOne + playerId)->characterId);
                 }
             }
@@ -2896,13 +2991,52 @@ void func_8004F3E4(s32 arg0) {
             }
             break;
         case BATTLE:
-            for (idx = 0; idx < gPlayerCountSelection1; idx++) {
-                if (!((gPlayerOne + idx)->type & PLAYER_UNKNOWN_0x40)) {
+            // Draw EVERY living kart, not just the human seats (gPlayerCountSelection1 is the human
+            // count - 1 in single-player battle). The CPU rivals exist beyond that, and a free-for-
+            // all wants them all on the radar. race_mods_player_exists keeps culled/empty seats off.
+            for (idx = 0; idx < NUM_PLAYERS; idx++) {
+                if (race_mods_player_exists(idx) && !((gPlayerOne + idx)->type & PLAYER_UNKNOWN_0x40)) {
                     draw_minimap_character(arg0, idx, (gPlayerOne + idx)->characterId);
                 }
             }
             break;
     }
+}
+
+// Treasure hunt: a flashing marker on the minimap where the prize box sits. Without it the
+// treasure is just another item box on a track full of them - this is what makes the hunt a hunt.
+// Same world-to-minimap mapping as draw_minimap_character; drawn through the same texrect helper
+// as the finish-line icon. (The first cut used the portrait sprite path, func_80042330 - that
+// both re-remaps x for widescreen AND pushes an interpolated matrix without a tag, so the frame
+// interpolator paired it with unrelated draws and the icon flew around the screen.)
+void draw_treasure_minimap_marker(s32 arg0) {
+    f32 tx;
+    f32 tz;
+    s16 x;
+    s16 y;
+    s32 center;
+
+    if (!race_mods_treasure_world_pos(&tx, &tz)) {
+        return;
+    }
+    if (CVarGetInteger("gTreasureHidden", 0)) {
+        return; // the hidden hunt - the map never tells
+    }
+    if (gGlobalTimer & 8) {
+        return; // flash so it reads as the objective, not another dot
+    }
+    if (gPlayerCount == 3) {
+        center = ((OTRGetDimensionFromRightEdge(SCREEN_WIDTH) - SCREEN_WIDTH) / 2) +
+                 ((SCREEN_WIDTH / 4) + (SCREEN_WIDTH / 2));
+    } else {
+        center = CM_GetProps()->Minimap.Pos[arg0].X;
+    }
+    x = (center - (CM_GetProps()->Minimap.Width / 2)) + CM_GetProps()->Minimap.PlayerX +
+        (s16) (tx * CM_GetProps()->Minimap.PlayerScaleFactor);
+    y = (CM_GetProps()->Minimap.Pos[arg0].Y - (CM_GetProps()->Minimap.Height / 2)) +
+        CM_GetProps()->Minimap.PlayerY + (s16) (tz * CM_GetProps()->Minimap.PlayerScaleFactor);
+
+    draw_hud_2d_texture_8x8(x - 4, y - 4, (u8*) common_texture_minimap_finish_line);
 }
 
 s32 func_8004F674(s32* arg0, s32 arg1) {
@@ -3032,15 +3166,24 @@ void render_hud_timer(s32 playerId) {
 }
 
 void draw_lap_count(s16 lapX, s16 lapY, s8 lap) {
+    s32 total = race_mods_total_laps();
     gSPDisplayList(gDisplayListHead++, D_0D008108);
     gSPDisplayList(gDisplayListHead++, D_0D007EF8);
     gDPSetAlphaCompare(gDisplayListHead++, G_AC_THRESHOLD);
-    load_texture_block_rgba16_mirror((u8*) common_texture_hud_123, 32, 8);
     // Display current lap. Ex. 1/3
-
-    func_8004BA98_wide(lapX, lapY, 8, 8, lap * 8, 0, 0); // display the digit
-    func_8004BA98_wide(lapX + 8, lapY, 8, 8, 24, 0, 0);  // display the /
-    func_8004BA98_wide(lapX + 16, lapY, 8, 8, 16, 0, 0); // display the 3
+    if (total <= 3) {
+        // The stock strip only has the glyphs "1 2 3 /", which covers totals up to 3.
+        load_texture_block_rgba16_mirror((u8*) common_texture_hud_123, 32, 8);
+        func_8004BA98_wide(lapX, lapY, 8, 8, lap * 8, 0, 0);            // display the digit
+        func_8004BA98_wide(lapX + 8, lapY, 8, 8, 24, 0, 0);             // display the /
+        func_8004BA98_wide(lapX + 16, lapY, 8, 8, (total - 1) * 8, 0, 0); // display the total
+    } else {
+        // Lap overrides past 3 (race setup screen) borrow the timer's 0-9 digit strip; its glyphs
+        // are 16 tall, so they draw 4 up from the small-strip baseline to stay bottom-aligned.
+        gSPDisplayList(gDisplayListHead++, D_0D007EB8);
+        draw_lap_fraction_digits(lapX, lapY - 4, lap, total);
+        return;
+    }
     gSPDisplayList(gDisplayListHead++, D_0D007EB8);
 }
 
@@ -3095,13 +3238,16 @@ void func_80050320(void) {
         for (i = 0; i < 4; i++) {
             var_a0 = 0;
             if (D_8018D050[i] >= 0.0f) {
+                temp_v0 = gGPCurrentRacePlayerIdByRank[i];
+                if (!race_mods_player_exists(temp_v0)) {
+                    continue; // a culled duel seat - the ladder only lists karts that exist
+                }
                 if (D_8018D078[i] < 0.0) {
                     var_a0 = 1;
                 }
 
                 FrameInterpolation_RecordOpenChild("ranking_portraits", (var_a0 << 4) | i);
 
-                temp_v0 = gGPCurrentRacePlayerIdByRank[i];
                 characterId = gGPCurrentRaceCharacterIdByRank[i];
                 lapCount = gLapCountByPlayerId[temp_v0];
                 if (characterId == gPlayerOne->characterId) {
@@ -3117,13 +3263,16 @@ void func_80050320(void) {
         for (i = 0; i < 8; i++) {
             var_a0 = 0;
             if (D_8018D050[i] >= 0.0f) {
+                temp_v0 = gGPCurrentRacePlayerIdByRank[i];
+                if (!race_mods_player_exists(temp_v0)) {
+                    continue; // a culled duel seat - the ladder only lists karts that exist
+                }
                 if (D_8018D078[i] <= 0.0) {
                     var_a0 = 1;
                 }
 
                 FrameInterpolation_RecordOpenChild("ranking_portraits2", (var_a0 << 4) | i);
 
-                temp_v0 = gGPCurrentRacePlayerIdByRank[i];
                 // ????
                 characterId = (gPlayerOne + temp_v0)->characterId;
                 lapCount = gLapCountByPlayerId[temp_v0];
@@ -3140,12 +3289,65 @@ void func_80050320(void) {
     gSPTexture(gDisplayListHead++, 0x0001, 0x0001, 0, G_TX_RENDERTILE, G_OFF);
 }
 
+// INFECTED mode's square status ladder: every racer's portrait in seat order down the left edge -
+// there is no first or last place in this mode, only sides, so the rank arrays and rank numbers
+// are deliberately absent. Green-tinted with a green frame = carrier; bright = survivor still
+// racing; faded = a survivor that already finished (escaped the outbreak). Replaces the rank
+// portrait ladder at its code_80057C60.c call site while the mode is live.
+void race_mods_draw_infected_ladder(void) {
+    s32 i;
+    s32 slot = 0;
+
+    for (i = 0; i < NUM_PLAYERS; i++) {
+        s32 st = race_mods_infected_marker(i);
+        s32 characterId;
+        s32 x;
+        s32 y;
+        if (st == 0) {
+            continue;
+        }
+        characterId = (gPlayerOne + i)->characterId;
+        x = 20;
+        y = 40 + slot * 21; // 8 seats: 40..187, clear of the lap counter and the status line
+
+        FrameInterpolation_RecordOpenChild("infected_ladder", (st << 4) | slot);
+
+        func_80042330_portrait(x, y, 0U, 0.62f, 0);
+        gSPDisplayList(gDisplayListHead++, D_0D007DB8);
+        if (st == 2) {
+            func_8004B35C(0x48, 0xFF, 0x48, 0xFF); // carrier - the plague green
+        } else if (st == 3) {
+            func_8004B35C(0xFF, 0xFF, 0xFF, 0x6E); // escaped - faded out of the hunt
+        } else {
+            func_8004B35C(0xFF, 0xFF, 0xFF, 0xFF); // survivor - full brightness
+        }
+        gDPLoadTLUT_pal256(gDisplayListHead++, gPortraitTLUTs[characterId]);
+        rsp_load_texture(gPortraitTextures[characterId], 0x00000020, 0x00000020);
+        gSPDisplayList(gDisplayListHead++, D_0D0069E0);
+
+        if (st == 2) {
+            // The green frame makes the side read even where the tint is subtle on dark art.
+            func_80042330_portrait(x, y, 0U, 0.62f, 0);
+            gSPDisplayList(gDisplayListHead++, D_0D007A60);
+            func_8004B35C(0x20, 0xE0, 0x20, 0x000000FF);
+            func_80044924(common_texture_character_portrait_border, 0x20, 0x20);
+            gSPDisplayList(gDisplayListHead++, D_0D0069E0);
+        }
+
+        FrameInterpolation_RecordCloseChild();
+        slot++;
+    }
+    gSPTexture(gDisplayListHead++, 0x0001, 0x0001, 0, G_TX_RENDERTILE, G_OFF);
+}
+
 s32 func_80050644(u16 arg0, s32* arg1, s32* arg2) {
     s32 var_v0 = 0;
     s32 thing = 0;
     s32 test = gLapCountByPlayerId[arg0];
 
-    if (test < 3) {
+    // Below the race's lap total the square tracks course progress; at the total it parks on the
+    // finished-rank ladder. Stock hardcoded 3, which froze the overlay after lap 3 of longer races.
+    if (test < race_mods_total_laps()) {
         if (gPlayerCountSelection1 == 1) {
             if (test >= 0) {
                 thing = (s32) (gLapCompletionPercentByPlayerId[arg0] * 928);
@@ -3342,7 +3544,7 @@ void func_80050E34(s32 playerId, s32 arg1) {
     }
 
     FrameInterpolation_RecordOpenChild("progress_portraits", TAG_PORTRAITS( ((playerId & 0x7) << 8) |  ((characterId & 0x7) << 5) | (objectIndex & 0x1F) ));
-    if ((IsYoshiValley()) && (lapCount < 3)) {
+    if ((IsYoshiValley()) && (lapCount < race_mods_total_laps())) {
         gSPDisplayList(gDisplayListHead++, D_0D007DB8);
         gDPLoadTLUT_pal256(gDisplayListHead++, common_tlut_portrait_bomb_kart_and_question_mark);
         rsp_load_texture(common_texture_portrait_question_mark, 0x00000020, 0x00000020);
@@ -3570,8 +3772,13 @@ void func_800520C0(s32 arg0) {
     }
 }
 
+// port/vr: First Person sits INSIDE the frozen block, so its back-culled faces need help below.
+extern bool vr_is_active(void);
+extern int vr_get_view_mode(void);
+
 void func_8005285C(s32 cameraId, s32 playerId) {
     Player* temp_v0;
+    s32 insideView;
 
     temp_v0 = &gPlayerOne[playerId];
     D_80183E40[0] = temp_v0->pos[0];
@@ -3580,8 +3787,18 @@ void func_8005285C(s32 cameraId, s32 playerId) {
     D_80183E80[0] = 0;
     D_80183E80[1] = 0;
     D_80183E80[2] = 0;
+    // First Person VR puts the eye inside your own ice block, where every face points away and
+    // back-face culling erases the whole thing - you froze but never saw the ice. Render the
+    // block double-sided for that one case so the cube visibly surrounds you.
+    insideView = (playerId == 0) && vr_is_active() && (vr_get_view_mode() == 1);
     FrameInterpolation_RecordOpenChild("ice_block", (playerId << 4) | cameraId);
+    if (insideView) {
+        gSPClearGeometryMode(gDisplayListHead++, G_CULL_BOTH);
+    }
     func_80043500(D_80183E40, D_80183E80, 0.02f, d_course_sherbet_land_dl_ice_block);
+    if (insideView) {
+        gSPSetGeometryMode(gDisplayListHead++, G_CULL_BACK);
+    }
     FrameInterpolation_RecordCloseChild();
 }
 

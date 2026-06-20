@@ -34,6 +34,9 @@ extern "C" {
     #include "collision.h"
     #include "memory.h"
     extern const char *kalimari_desert_dls[80];
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 KalimariDesert::KalimariDesert() {
@@ -178,6 +181,13 @@ void KalimariDesert::BeginPlay() {
         _numTrains = CVarGetInteger("gNumTrains", 2);
         _numCarriages = CVarGetInteger("gNumCarriages", 5);
         _tender = (ATrain::TenderStatus)CVarGetInteger("gHasTender", 1);
+
+        // PROP SWAP: the trains stay in the roundhouse - race_mods spawns the replacement
+        // menagerie along the racing line instead. The crossings stay (they just never close).
+        if (race_mods_prop_swap_live()) {
+            race_mods_prop_swap_register((int) _numTrains);
+            _numTrains = 0;
+        }
 
         // Spawn two trains
         for (size_t i = 0; i < _numTrains; ++i) {

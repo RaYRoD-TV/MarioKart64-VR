@@ -16,6 +16,8 @@ extern "C" {
 #include "code_80005FD0.h"
 #include "external.h"
 #include "course_offsets.h"
+// race_mods.c: the hazard diag breadcrumb line (racemods_diag.txt).
+void race_mods_diag_line(const char* fmt, ...);
 }
 
 size_t OChainChomp::_count = 0;
@@ -40,12 +42,36 @@ OChainChomp::OChainChomp(const SpawnParams& params) {
     _count++;
 }
 
+// Track-hazard variant: a chomp at an explicit high indexObjectList2 slot so it can patrol ANY
+// course without fighting the low slots that course's own objects sit in. The path start spot
+// derives from the slot too (func_80085878), wrapped to the course's path length there.
+OChainChomp::OChainChomp(size_t fixedSlot) {
+    Name = "Chain Chomp";
+    ResourceName = "mk:chain_chomp";
+    _idx = fixedSlot;
+    init_object(indexObjectList2[_idx], 0);
+    _objectIndex = indexObjectList2[_idx];
+
+    _count++;
+}
+
+// Prop-swap variant: the fixed slot plus an explicit path start, so the takeover's chomps land
+// evenly spaced along the racing line instead of wherever the slot formula scatters them.
+OChainChomp::OChainChomp(size_t fixedSlot, s32 pathStart) : OChainChomp(fixedSlot) {
+    _pathStart = pathStart;
+}
+
 void OChainChomp::Tick() {
     s32 objectIndex;
     Object* object;
 
     objectIndex = indexObjectList2[_idx];
     object = &gObjectList[objectIndex];
+    if (!_diagTicked) {
+        _diagTicked = true;
+        race_mods_diag_line("chomp first tick: slot=%d obj=%d state=%d pos=(%.0f %.0f %.0f)", (s32) _idx, objectIndex,
+                            object->state, object->pos[0], object->pos[1], object->pos[2]);
+    }
     if (object->state != 0) {
         OChainChomp::func_800859C8(objectIndex, _idx);
         vec3f_copy(object->unk_01C, object->offset);
@@ -62,6 +88,14 @@ void OChainChomp::Draw(s32 cameraId) {
 
     objectIndex = indexObjectList2[_idx];
     func_8008A1D0(objectIndex, cameraId, 0x000005DC, 0x000009C4);
+    if (!_diagDrawn) {
+        _diagDrawn = true;
+        race_mods_diag_line("chomp first draw: slot=%d obj=%d state=%d visible=%d pos=(%.0f %.0f %.0f)", (s32) _idx,
+                            objectIndex, gObjectList[objectIndex].state,
+                            is_obj_flag_status_active(objectIndex, VISIBLE) != 0 ? 1 : 0,
+                            gObjectList[objectIndex].pos[0], gObjectList[objectIndex].pos[1],
+                            gObjectList[objectIndex].pos[2]);
+    }
     if (is_obj_flag_status_active(objectIndex, VISIBLE) != 0) {
         func_80055AB8(objectIndex, cameraId);
     }
@@ -108,13 +142,27 @@ void OChainChomp::func_80085878(s32 objectIndex, s32 arg1) {
     object->sizeScaling = 0.03f;
     object->boundingBoxSize = 0x000A;
     set_object_flag(objectIndex, 0x04000200);
-    object->unk_084[8] = (arg1 * 0x12C) + 0x1F4;
+    // Wrapped to the course's path length: hazard chomps spawn with high slot indices on tracks
+    // far shorter than Rainbow Road, and the raw `idx * 300 + 500` walked off the path array.
+    // A prop-swap chomp brings its own start waypoint instead (even spread along the line).
+    if (_pathStart >= 0) {
+        object->unk_084[8] = (s32) (_pathStart % (gSelectedPathCount > 0 ? gSelectedPathCount : 1));
+    } else {
+        object->unk_084[8] = (s32) (((arg1 * 0x12C) + 0x1F4) % (gSelectedPathCount > 0 ? gSelectedPathCount : 1));
+    }
     set_obj_origin_pos(objectIndex, 0.0f, -15.0f, 0.0f);
     temp_v0 = &gCurrentTrackPath[(u16) object->unk_084[8]];
     set_obj_origin_offset(objectIndex, temp_v0->x, temp_v0->y, temp_v0->z);
     set_obj_direction_angle(objectIndex, 0U, 0U, 0U);
     object->unk_034 = 4.0f;
     object->type = get_animation_length(d_rainbow_road_unk3, 0);
+    // The draw feeds textureListIndex into render_animated_model as the animation TIMER, and
+    // init_object doesn't clear it - a mid-race spawn inherits whatever the slot last held.
+    // Garbage past the animation length clamps to 0, but garbage NEGATIVE walks render_armature
+    // off the front of the frame table. Start the chomp at frame zero explicitly.
+    object->textureListIndex = 0;
+    race_mods_diag_line("chomp init: obj=%d pathIdx=%d origin=(%.0f %.0f %.0f)", objectIndex,
+                        (s32) object->unk_084[8], (f32) temp_v0->x, (f32) temp_v0->y, (f32) temp_v0->z);
     object_next_state(objectIndex);
 }
 

@@ -36,6 +36,9 @@ extern "C" {
     extern const char *moo_moo_farm_dls[92];
     extern s16 currentScreenSection;
     extern s8 gPlayerCount;
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 MooMooFarm::MooMooFarm() {
@@ -139,7 +142,11 @@ void MooMooFarm::BeginPlay() {
         find_unused_obj_index(&gObjectParticle2[i]);
     }
 
-    if (gGamestate != CREDITS_SEQUENCE) {
+    // PROP SWAP: the mole colonies stay underground and race_mods spawns the chosen menagerie
+    // along the racing line instead (31 burrows worth - the per-mode caps trim the pack).
+    if (gGamestate != CREDITS_SEQUENCE && race_mods_prop_swap_live()) {
+        race_mods_prop_swap_register(31);
+    } else if (gGamestate != CREDITS_SEQUENCE) {
         std::vector<FVector> moleSpawns1 = {
             { FVector(771, 20, -2022) },
             { FVector(807, 15, -2063) },

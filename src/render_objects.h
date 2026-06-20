@@ -300,6 +300,7 @@ void func_8004EF9C(s32);
 void set_minimap_finishline_position(s32);
 void draw_minimap_character(s32, s32, s32);
 void func_8004F3E4(s32);
+void draw_treasure_minimap_marker(s32);
 s32 func_8004F674(s32*, s32);
 void print_timer(s32, s32, s32);
 void func_8004F950(s32, s32, s32, s32);

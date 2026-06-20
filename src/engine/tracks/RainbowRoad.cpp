@@ -32,6 +32,9 @@ extern "C" {
     #include "collision.h"
     #include "memory.h"
     extern const char *rainbow_road_dls[48];
+    // race_mods.c: the PROP SWAP gate (see race_mods.h).
+    int race_mods_prop_swap_live(void);
+    void race_mods_prop_swap_register(int skippedCount);
 }
 
 RainbowRoad::RainbowRoad() {
@@ -135,9 +138,15 @@ void RainbowRoad::BeginPlay() {
     spawn_all_item_boxes((struct ActorSpawnData*)LOAD_ASSET_RAW(d_course_rainbow_road_item_box_spawns));
 
     if (gGamestate != CREDITS_SEQUENCE) {
-        AddObjectToWorld<OChainChomp>({});
-        AddObjectToWorld<OChainChomp>({});
-        AddObjectToWorld<OChainChomp>({});
+        // PROP SWAP: the three resident chomps stand down and race_mods spawns the chosen
+        // menagerie along the racing line (CHOMPS just respaces them; BOMB KARTS etc. go wild).
+        if (race_mods_prop_swap_live()) {
+            race_mods_prop_swap_register(3);
+        } else {
+            AddObjectToWorld<OChainChomp>({});
+            AddObjectToWorld<OChainChomp>({});
+            AddObjectToWorld<OChainChomp>({});
+        }
     }
 
     if (gModeSelection == VERSUS) {

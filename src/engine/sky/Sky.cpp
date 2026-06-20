@@ -272,10 +272,17 @@ void Sky::DrawFloor(ScreenContext* screen) { // func_802A487C
     gSP2Triangles(gDisplayListHead++, 0, 3, 1, 0, 1, 3, 2, 0);
 }
 
+extern "C" float gVRSkyCloudM200; // VR sky-remap calibration (SkyCloud/SkyStar/SkySnow publish per tick)
+
 void Sky::InitActors(ScreenContext* screen) {
     size_t iterations = 0;
     size_t numSnow = 0;
     Track* track = GetWorld()->GetTrack();
+
+    // New track = new sky sprites + new camera fov. Drop the previous track's calibration so the dome
+    // remap falls back to a live camera read until this track's sprites publish their real value (next
+    // tick) - a stale m200 from the prior track makes the new track's sky swim during turns.
+    gVRSkyCloudM200 = 0.0f;
 
     if (!track) {
         printf("[Sky] No track ptr found, skipping sky actors\n");

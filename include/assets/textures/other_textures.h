@@ -573,9 +573,9 @@ static const ALIGN_ASSET(2) char gTexture68DEC0[] = "__OTR__textures/other_textu
 
 static const ALIGN_ASSET(2) char gTexture68E2D0[] = "__OTR__textures/other_textures/texture_68E2D0";
 
-static const ALIGN_ASSET(2) char texture_red_shell_0[] = "__OTR__textures/other_textures/texture_red_shell_0";
-
 static const ALIGN_ASSET(2) char texture_green_shell_0[] = "__OTR__textures/other_textures/texture_green_shell_0";
+
+static const ALIGN_ASSET(2) char texture_red_shell_0[] = "__OTR__textures/other_textures/texture_red_shell_0";
 
 static const ALIGN_ASSET(2) char texture_green_shell_1[] = "__OTR__textures/other_textures/texture_green_shell_1";
 
@@ -589,9 +589,9 @@ static const ALIGN_ASSET(2) char texture_green_shell_3[] = "__OTR__textures/othe
 
 static const ALIGN_ASSET(2) char texture_red_shell_3[] = "__OTR__textures/other_textures/texture_red_shell_3";
 
-static const ALIGN_ASSET(2) char texture_red_shell_4[] = "__OTR__textures/other_textures/texture_red_shell_4";
-
 static const ALIGN_ASSET(2) char texture_green_shell_4[] = "__OTR__textures/other_textures/texture_green_shell_4";
+
+static const ALIGN_ASSET(2) char texture_red_shell_4[] = "__OTR__textures/other_textures/texture_red_shell_4";
 
 static const ALIGN_ASSET(2) char texture_green_shell_5[] = "__OTR__textures/other_textures/texture_green_shell_5";
 

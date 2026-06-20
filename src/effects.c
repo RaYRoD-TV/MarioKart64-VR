@@ -10,6 +10,8 @@
 #include "waypoints.h"
 #include "code_80005FD0.h"
 #include "render_player.h"
+#include "race_mods.h" // race_mods_infected_star_used - a carrier's star item = hunting surge
+#include "race_mods.h" // race_mods_infected_carrier - a carrier's star must not eat their items
 #include "player_controller.h"
 #include "render_objects.h"
 #include "code_80057C60.h"
@@ -1403,6 +1405,11 @@ void trigger_star(Player* player, s8 arg1) {
     gPlayerStarEffectStartTime[arg1] = gCourseTimer;
     D_8018D900[arg1] = 1;
 
+    // Infected mode: a carrier's permanent plague star already owns the physics perks, so the
+    // star ITEM grants a real hunting surge instead (race_mods no-ops this for everyone else).
+    // The fresh start-time stamp above replays the rainbow for the star's own window.
+    race_mods_infected_star_used(arg1);
+
     if (((player->type & PLAYER_HUMAN) == PLAYER_HUMAN) &&
         ((player->type & PLAYER_INVISIBLE_OR_BOMB) != PLAYER_INVISIBLE_OR_BOMB)) {
         if (D_8018D900[arg1] == 1) {
@@ -1895,11 +1902,19 @@ void func_80090970(Player* player, s8 playerId, s8 arg2) {
 
 bool prevent_item_use(Player* player) {
     s32 phi_v0 = 0;
+    s32 blacklist = EFFECT_BLACKLIST_USE_ITEM;
     if ((((((player->lakituProps & HELD_BY_LAKITU) == HELD_BY_LAKITU) || ((player->lakituProps & LAKITU_SCENE) == LAKITU_SCENE)) ||
           ((player->type & PLAYER_UNKNOWN_0x40) != 0)) ||
          ((player->type & PLAYER_CINEMATIC_MODE) != 0)) ||
         ((player->type & PLAYER_EXISTS) == 0)) {
         return true;
+    }
+
+    // An infected carrier's star never ends, and the blacklist's STAR_EFFECT bit was silently
+    // eating Z for mushrooms, stars and boos (shells and bananas take the empty default mask) -
+    // the "I still can't use items while infected" bug. Carriers drop that one bit.
+    if (race_mods_infected_carrier(player - gPlayerOne)) {
+        blacklist &= ~STAR_EFFECT;
     }
 
     switch (player->currentItemCopy) {
@@ -1910,12 +1925,12 @@ bool prevent_item_use(Player* player) {
             if ((player->effects & 8) != 0) {
                 return true;
             }
-            phi_v0 = EFFECT_BLACKLIST_USE_ITEM;
+            phi_v0 = blacklist;
             goto prevent_item_use_label;
         case ITEM_STAR:
-            phi_v0 = BOO_EFFECT | EFFECT_BLACKLIST_USE_ITEM;
+            phi_v0 = BOO_EFFECT | blacklist;
         case ITEM_BOO:
-            phi_v0 = phi_v0 | (BOO_EFFECT | EFFECT_BLACKLIST_USE_ITEM);
+            phi_v0 = phi_v0 | (BOO_EFFECT | blacklist);
         prevent_item_use_label:
         default:
             if ((player->effects & phi_v0) != 0) {
