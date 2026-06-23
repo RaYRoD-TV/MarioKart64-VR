@@ -2698,6 +2698,12 @@ void draw_lap_fraction_digits(s32 x, s32 y, s32 lap, s32 total) {
 
 void draw_simplified_lap_count(s32 playerId) {
     s32 total = race_mods_total_laps();
+    // Treasure hunt: once the prize is claimed, the force-finish flings every lap count up to the
+    // NO-LIMIT total to trigger the engine's finish. Hide the counter from that point so the jump
+    // never shows as the lap "incrementing" at the end of the hunt.
+    if (race_mods_treasure_decided()) {
+        return;
+    }
     // NO LIMIT races (the 100 sentinel): a forced match end (balloon elimination, treasure
     // find, infected verdict) stages the lap counter through 99/100 to fire the engine's real
     // finish flow - that number is plumbing, not progress. Hide the readout once it happens
@@ -3308,7 +3314,10 @@ void race_mods_draw_infected_ladder(void) {
         }
         characterId = (gPlayerOne + i)->characterId;
         x = 20;
-        y = 40 + slot * 21; // 8 seats: 40..187, clear of the lap counter and the status line
+        // Start the ladder BELOW the LAP counter - the HD texture pack draws "LAP" taller than the
+        // stock glyph metrics, so the old y=40 top seat overlapped it. 8 seats span ~62..202,
+        // tightened to 20px so the column still clears the bottom edge.
+        y = 62 + slot * 20;
 
         FrameInterpolation_RecordOpenChild("infected_ladder", (st << 4) | slot);
 

@@ -18,6 +18,8 @@ void race_mods_action_cam_tick(void);
 // Total laps for the current race: 3 unless the LAPS row overrides it (GP and VS only).
 // Consumed by the finish-line / HUD / music comparisons that used to hardcode 3.
 int race_mods_total_laps(void);
+// LOW GRAVITY mode: factor player_controller.c multiplies kart gravity by (1.0 = off). Floaty karts.
+float race_mods_gravity_scale(void);
 
 // True while the BALLOONS race mode is live: code_80057C60.c's battle-balloon tick and render
 // gates let the balloons through outside battle mode when this reports active.
@@ -93,6 +95,9 @@ int race_mods_player_exists(int i);
 // render read these.
 int race_mods_treasure_world_pos(float* outX, float* outZ);
 int race_mods_treasure_actor_index(void);
+// True once the prize is claimed - the HUD lap counter hides itself so the force-finish's jump to the
+// NO-LIMIT lap total isn't shown ticking up at the end of a treasure hunt.
+int race_mods_treasure_decided(void);
 
 // PROP SWAP (the setup screen's PROP SWAP row): courses with signature movers ask this at
 // BeginPlay - nonzero (the mode: 1 chomps / 2 bomb karts / 3 snowmen / 4 penguins / 5 mixed)

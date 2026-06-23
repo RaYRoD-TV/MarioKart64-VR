@@ -72,13 +72,14 @@ enum {
     ROW_SIZE,
     ROW_CPU_SKILL,
     ROW_CATCHUP,
+    ROW_LOWGRAV,
     ROW_START,
     ROW_COUNT
 };
 
 static const char* const kRowLabels[ROW_COUNT] = {
     "ITEMS",  "SAME ITEM", "CPU ITEMS TOO", "ITEM RAIN", "HAZARDS",   "PROP SWAP", "MODE",      "BALLOON OUT",
-    "LAPS",   "SPEED CLASS", "MIRROR", "KART SIZE",   "CPU SKILL", "CPU CATCH UP", "START RACE"
+    "LAPS",   "SPEED CLASS", "MIRROR", "KART SIZE",   "CPU SKILL", "CPU CATCH UP", "LOW GRAVITY", "START RACE"
 };
 
 // gPropSwap: courses with signature movers (turnpike traffic, kalimari trains, frappe snowmen,
@@ -274,6 +275,9 @@ static void row_change(s32 dir) {
             break;
         case ROW_CATCHUP:
             CVarSetInteger("gDisableRubberbanding", !CVarGetInteger("gDisableRubberbanding", 0));
+            break;
+        case ROW_LOWGRAV:
+            CVarSetInteger("gLowGravity", !CVarGetInteger("gLowGravity", 0));
             break;
     }
 }
@@ -476,6 +480,7 @@ static const char* row_help(void) {
         case ROW_SIZE:     return "TINY OR GIANT OR EVERY KART ITS OWN SIZE";
         case ROW_CPU_SKILL: return "HARD CPUS DRIVE FASTER LINES";
         case ROW_CATCHUP:   return "OFF STOPS CPUS CHEATING TO KEEP UP";
+        case ROW_LOWGRAV:   return "FLOATY KARTS - HIGHER HOPS AND BIG AIR";
         case ROW_START:     return "OFF YOU GO";
     }
     return "";
@@ -556,6 +561,7 @@ void race_mods_reset_to_stock(void) {
     CVarSetInteger("gEnableCustomCC", 0);
     CVarSetInteger("gDuelRival", 0);
     CVarSetInteger("gVersusDuel", 0);
+    CVarSetInteger("gLowGravity", 0);
     // gItemModeItem / gItemModeCPU / gBalloonOut keep their values - they're preferences, inert
     // while their parent mode is off. The port's own cheats (gHarderCPU / gDisableRubberbanding)
     // stay user-managed.
@@ -647,6 +653,15 @@ void race_mods_draw_status_hud(void) {
         return;
     }
 
+    // Infected's verdict (status 2 = survivors held, 3 = the infection took the field) also has to
+    // read on the finish/score screen, so it's drawn BEFORE the bailout - otherwise the result
+    // flashed for an instant and vanished. Green-ish yellow for the survivors, red for the outbreak.
+    if (status == 2 || status == 3) {
+        set_text_color((status == 2) ? TEXT_YELLOW : TEXT_RED);
+        race_mods_text_fit_center(160, 110, (status == 2) ? "SURVIVORS WIN" : "INFECTED WIN", 0.65f, 210.0f);
+        return;
+    }
+
     if (gRaceState >= RACE_FINISHED) {
         return; // the score screen / post-race menu owns the view - no banners or rows over it
     }
@@ -735,9 +750,8 @@ void race_mods_draw_status_hud(void) {
         race_mods_text_fit_center(160, 198, "INFECTED", 0.5f, 160.0f);
         return;
     }
-    // Mid-screen, clear of the item window above and the lap counter below.
-    set_text_color(TEXT_YELLOW);
-    race_mods_text_fit_center(160, 124, (status == 2) ? "SURVIVORS WIN" : "INFECTED WINS", 0.55f, 180.0f);
+    // (status 2/3 - the decided verdict - is drawn near the top, before the score-screen bailout,
+    // so the SURVIVORS WIN / INFECTED WIN result survives onto the finish screen.)
 }
 
 // Bottom-left hint on the course select screen: Z rerolls the course (or shuffles the GP cup order).
@@ -870,6 +884,9 @@ static void value_string(s32 row, char* out) {
         case ROW_CATCHUP:
             sprintf(out, "%s", CVarGetInteger("gDisableRubberbanding", 0) ? "OFF" : "ON");
             break;
+        case ROW_LOWGRAV:
+            sprintf(out, "%s", CVarGetInteger("gLowGravity", 0) ? "ON" : "OFF");
+            break;
         default:
             out[0] = '\0'; // START RACE has no value
             break;
@@ -954,7 +971,7 @@ void race_mods_draw(void) {
     race_mods_text_fit_center(160, 36, sBattle ? "BATTLE SETUP" : "RACE SETUP", 0.7f, 270.0f);
 
     for (i = 0; i < rowCount; i++) {
-        // The race trim packs 15 rows at a 10px pitch; battle's 9 rows breathe at 14.
+        // The race trim packs 16 rows at a 10px pitch; battle's 9 rows breathe at 14.
         s32 y = sBattle ? (58 + i * 14) : (53 + i * 10);
         const char* label = sBattle ? kBattleRowLabels[i] : kRowLabels[i];
         char val[32];

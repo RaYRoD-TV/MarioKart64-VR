@@ -1038,6 +1038,10 @@ void func_8002AB70(Player* player) {
     if ((player->effects & HIT_BY_ITEM_EFFECT) == HIT_BY_ITEM_EFFECT) {
         player->kartGravity = 800.0f;
     }
+    // LOW GRAVITY mode (race_mods): scale the finalized gravity so the karts float - higher hops,
+    // big air off ramps, slow falls. Applied last so it covers whatever state set it above; the
+    // helper returns 1.0 when the mode is off, so stock physics are untouched.
+    player->kartGravity *= race_mods_gravity_scale();
 }
 
 UNUSED void func_8002AE20(void) {

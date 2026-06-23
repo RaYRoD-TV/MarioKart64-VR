@@ -296,6 +296,17 @@ int race_mods_total_laps(void) {
     return (laps >= 1 && laps <= 9) ? laps : 3;
 }
 
+// LOW GRAVITY mode (gLowGravity): the factor player_controller.c multiplies the finalized kart
+// gravity by, so karts hop higher, catch big air off ramps, and drift down slowly. 1.0 = normal.
+// GP/VS races only, never attract demos.
+float race_mods_gravity_scale(void) {
+    if (!CVarGetInteger("gLowGravity", 0) || gDemoMode != 0 ||
+        (gModeSelection != GRAND_PRIX && gModeSelection != VERSUS)) {
+        return 1.0f;
+    }
+    return 0.5f;
+}
+
 // The CC -> speed-field mapping spawn_players uses: linear through the CC_50 and CC_150 anchors.
 static f32 cc_lerp(f32 v50, f32 v150, f32 cc) {
     f32 a = (v150 - v50) / 100.0f;
@@ -655,6 +666,7 @@ static s32 sInfectLive; // set per tick while an infected race runs (the sBalloo
 static s32 sInfectEndTimer;
 static s32 sInfectEndFired;
 static s32 sInfectVerdict; // 0 undecided / 1 survivors won / 2 the infection won
+static s32 sInfectGrace;   // opening no-conversion window so the bunched grid can't end it on lap 1
 
 int race_mods_infected_active(void) {
     return sInfectLive;
@@ -866,8 +878,10 @@ static int race_mods_tag_hunt_target(int playerId, float* outX, float* outY, flo
     return 1;
 }
 
-#define TREASURE_DIVE_RADIUS 450.0f // the prize outranks the racing line inside this ring
-#define TREASURE_DIVE_CLOSE 150.0f  // close-in: ease the throttle so the turn radius can land
+#define TREASURE_DIVE_RADIUS 160.0f // CPUs only break off the line if the prize is genuinely close -
+                                    // a wide ring let them beeline straight to the exact spot and
+                                    // end the hunt in seconds (they "knew" where it was)
+#define TREASURE_DIVE_CLOSE 80.0f   // close-in: ease the throttle so the turn radius can land
 
 // One steering authority for every CPU hunt (code_80005FD0.c's three hook sites read this):
 // 1 = infected carrier chasing a survivor OR the IT kart chasing its next victim in tag (flat out),
@@ -967,27 +981,34 @@ static void infected_tick(void) {
         }
     }
 
-    // Spread by touch. Conversion is one-way, so no immunity window is needed - a pileup chain
-    // converting several karts at once is exactly the horror it should be. A survivor riding a
-    // Boo is a ghost: the outbreak can't touch what it can't see.
-    for (i = 0; i < NUM_PLAYERS; i++) {
-        if (!sInfected[i] || !player_exists(i) || (gPlayers[i].type & PLAYER_CINEMATIC_MODE)) {
-            continue;
-        }
-        for (j = 0; j < NUM_PLAYERS; j++) {
-            f32 dx, dy, dz;
-            if (sInfected[j] || !player_exists(j) || (gPlayers[j].type & PLAYER_CINEMATIC_MODE) ||
-                (gPlayers[j].effects & BOO_EFFECT)) {
+    // Opening grace: hold off ALL conversions until the field has spread off the start grid.
+    // Without it, the carrier chain-converts the whole bunched pack in the first second and the
+    // match is decided on lap 1 (the "I win instantly" bug). The timer only ticks while racing.
+    if (sInfectGrace > 0) {
+        sInfectGrace--;
+    } else {
+        // Spread by touch. Conversion is one-way, so no immunity window is needed - a pileup chain
+        // converting several karts at once is exactly the horror it should be. A survivor riding a
+        // Boo is a ghost: the outbreak can't touch what it can't see.
+        for (i = 0; i < NUM_PLAYERS; i++) {
+            if (!sInfected[i] || !player_exists(i) || (gPlayers[i].type & PLAYER_CINEMATIC_MODE)) {
                 continue;
             }
-            dx = gPlayers[j].pos[0] - gPlayers[i].pos[0];
-            dy = gPlayers[j].pos[1] - gPlayers[i].pos[1];
-            dz = gPlayers[j].pos[2] - gPlayers[i].pos[2];
-            if (dx * dx + dy * dy + dz * dz < INFECTED_TOUCH_RADIUS * INFECTED_TOUCH_RADIUS) {
-                sInfected[j] = 1;
-                gPlayers[j].topSpeed *= INFECTED_SPEED_BONUS;
-                gPlayerStarEffectStartTime[j] = (s32) gCourseTimer; // the conversion rainbow flash
-                play_sound2(SOUND_MENU_OK_CLICKED);
+            for (j = 0; j < NUM_PLAYERS; j++) {
+                f32 dx, dy, dz;
+                if (sInfected[j] || !player_exists(j) || (gPlayers[j].type & PLAYER_CINEMATIC_MODE) ||
+                    (gPlayers[j].effects & BOO_EFFECT)) {
+                    continue;
+                }
+                dx = gPlayers[j].pos[0] - gPlayers[i].pos[0];
+                dy = gPlayers[j].pos[1] - gPlayers[i].pos[1];
+                dz = gPlayers[j].pos[2] - gPlayers[i].pos[2];
+                if (dx * dx + dy * dy + dz * dz < INFECTED_TOUCH_RADIUS * INFECTED_TOUCH_RADIUS) {
+                    sInfected[j] = 1;
+                    gPlayers[j].topSpeed *= INFECTED_SPEED_BONUS;
+                    gPlayerStarEffectStartTime[j] = (s32) gCourseTimer; // the conversion rainbow flash
+                    play_sound2(SOUND_MENU_OK_CLICKED);
+                }
             }
         }
     }
@@ -1030,7 +1051,7 @@ static void infected_tick(void) {
     // The match is decided only when no clean kart is left ON TRACK: every survivor either
     // crossed the line or got converted. Anyone escaped = the survivors' side held; nobody
     // escaped = the infection took the whole field. No first, no last - just sides.
-    if (sInfectSeeded && !sInfectEndFired && sInfectEndTimer == 0 && racing > 0 &&
+    if (sInfectSeeded && sInfectGrace == 0 && !sInfectEndFired && sInfectEndTimer == 0 && racing > 0 &&
         racingInfected == racing) {
         if (sInfectVerdict == 0) {
             sInfectVerdict = (cleanFinished > 0) ? 1 : 2;
@@ -1237,7 +1258,9 @@ static void treasure_spawn(void) {
         s32 idx = gSelectedPathCount * 3 / 20 + (s32) random_int((u16) (gSelectedPathCount * 7 / 10));
         TrackPathPoint* wp = &path[idx % gSelectedPathCount];
         u16 heading = (u16) random_int((u16) 0xFFFF);
-        f32 dist = hidden ? (60.0f + (f32) random_int(540)) : (f32) random_int(300);
+        // Always set the prize OFF the racing line (shown: 120-340 out, hidden: 60-600) so karts
+        // racing the line don't just drive over it in the first seconds - finding it has to be a hunt.
+        f32 dist = hidden ? (60.0f + (f32) random_int(540)) : (120.0f + (f32) random_int(220));
         f32 px = (f32) wp->x + sins(heading) * dist;
         f32 pz = (f32) wp->z + coss(heading) * dist;
         // Probe start sits LOW (+45) so a tunnel's roof stays above it - the ray then finds the
@@ -1279,6 +1302,13 @@ int race_mods_treasure_world_pos(float* outX, float* outZ) {
 
 int race_mods_treasure_actor_index(void) {
     return sTreasureActive ? sTreasureActorIdx : -1;
+}
+
+// True once the prize has been claimed (treasure hunt is over). The HUD lap counter reads this and
+// hides itself: the force-finish flings every kart's lap count up to the NO-LIMIT total to trigger
+// the real finish, and we don't want that jump shown as the lap counter "incrementing" at the end.
+int race_mods_treasure_decided(void) {
+    return sTreasureWinner >= 0;
 }
 
 // The finder IS the winner: bubble them to rank 1 in BOTH rank-table pairs plus currentRank,
@@ -2065,6 +2095,7 @@ void race_mods_tick(void) {
             sInfectEndTimer = 0;
             sInfectEndFired = 0;
             sInfectVerdict = 0;
+            sInfectGrace = 150; // ~5s after the green light before the infection can spread/decide
             // Tag IT resets HERE (one-shot on entering pre-race), NOT per pre-race frame, so the
             // staging seed below survives the countdown and the "<X> IS IT" banner shows from the
             // start (a per-frame reset would wipe the seed every frame, like infected above).
