@@ -614,7 +614,7 @@ void PortMenu::AddRulesets() {
                      .Tooltip("How much of your view the in-game HUD (item box, positions) fills. Smaller = more central."));
     AddWidget(path, "HUD Distance (m)", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar("gVRHudDist")
-        .Options(UIWidgets::FloatSliderOptions().Min(0.5f).Max(8.0f).Step(0.1f).DefaultValue(2.4f).Format("%.1f"));
+        .Options(UIWidgets::FloatSliderOptions().Min(0.5f).Max(8.0f).Step(0.1f).DefaultValue(2.90f).Format("%.1f"));
     AddWidget(path, "Menu Distance (m)", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar("gVRMenuDist")
         .Options(UIWidgets::FloatSliderOptions().Min(1.0f).Max(8.0f).Step(0.1f).DefaultValue(3.2f).Format("%.1f"));
@@ -656,7 +656,7 @@ void PortMenu::AddRulesets() {
             CVarSetFloat("gVRStereo", 0.5f);
             CVarSetFloat("gVREyeHeight", 0.16f);
             CVarSetFloat("gVRHudScale", 0.35f);
-            CVarSetFloat("gVRHudDist", 2.4f);
+            CVarSetFloat("gVRHudDist", 2.90f);
             CVarSetFloat("gVRMenuDist", 3.2f);
             CVarSetFloat("gVRMenuSize", 4.2f);
             CVarSetFloat("gVRMenuOpacity", 1.0f);

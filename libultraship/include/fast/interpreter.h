@@ -389,7 +389,8 @@ class Interpreter {
     // perspective (the world->camera lookAt is preserved); RunVrPanel renders flat (game projection,
     // full 2D+3D) for non-gameplay screens (title/menu/intro) shown on the head-locked panel. ---
     void RunVrEye(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtxReplacements, const float* eyeViewProj16,
-                  const float* skyViewProj16, const float* hudViewProj16, Gfx* skyDome, int eyeWidth, int eyeHeight);
+                  const float* skyViewProj16, const float* hudViewProj16, const float* full2DViewProj16,
+                  Gfx* skyDome, int eyeWidth, int eyeHeight);
     void RunVrPanel(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtxReplacements, int width, int height);
     unsigned int GetVrFbTextureId() const; // GL texture id of mVrFb's color attachment (0 if none)
     int32_t GetVrFbId() const {            // managed framebuffer id of the VR render target (-1 if none);
@@ -535,6 +536,8 @@ class Interpreter {
     bool  mVrEyeActive = false;
     float mVrEyeVP[4][4] = {};
     float mVrHudVP[4][4] = {};         // head-locked HUD plane (post-3D ortho draws map onto this)
+    float mVrFull2D[4][4] = {};        // full-FOV head-locked plane (pre-3D screen-space 2D maps onto this so
+                                       // it fills the view head-locked instead of doubling under the per-eye submit)
     bool  mVrSeenPerspective = false;  // a 3D (perspective) draw has happened this eye -> ortho now = HUD
     bool  mVrSeenHudOrtho = false;     // the HUD's 2D ortho has started -> everything after = HUD (incl. the
                                        // item-box 3D item) so it maps onto the HUD plane, not the world

@@ -1447,6 +1447,14 @@ void Interpreter::GfxSpMatrix(uint8_t parameters, const int32_t* addr) {
                 // textured cloud/star/snow tris survive and ride the remap.
                 memcpy(mRsp->P_matrix, matrix, sizeof(matrix));
                 mVrSky2D = true;
+            } else if (mVrEyeActive) {
+                // Screen-space 2D during the eye pass that no earlier branch claimed: the pre-3D course-open
+                // intro overlay (the "transition in"), and the 2D sky on tracks without the VR dome. Emit it on
+                // the full-FOV HEAD-LOCKED plane instead of raw screen-space. Raw ortho is IDENTICAL in both
+                // eyes, and the per-eye ASYMMETRIC submission fov then shoves the two copies apart -> the
+                // course-open double vision. The head-locked plane carries no inter-eye disparity, so 2D can't
+                // double; the 3D world (perspective branch above) keeps its real per-eye stereo.
+                MatrixMul(mRsp->P_matrix, matrix, mVrFull2D);
             } else {
                 memcpy(mRsp->P_matrix, matrix, sizeof(matrix));
             }
@@ -5247,7 +5255,7 @@ void Interpreter::RenderVrTarget(Gfx* commands, const std::unordered_map<Mtx*, M
 // mtxReplacements carries the frame-interpolation matrices for this step (empty = the keyframe).
 void Interpreter::RunVrEye(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtxReplacements,
                            const float* eyeViewProj16, const float* skyViewProj16, const float* hudViewProj16,
-                           Gfx* skyDome, int eyeWidth, int eyeHeight) {
+                           const float* full2DViewProj16, Gfx* skyDome, int eyeWidth, int eyeHeight) {
     if (eyeViewProj16 != nullptr) {
         memcpy(mVrEyeVP, eyeViewProj16, sizeof(mVrEyeVP));
     }
@@ -5256,6 +5264,9 @@ void Interpreter::RunVrEye(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& 
     }
     if (hudViewProj16 != nullptr) {
         memcpy(mVrHudVP, hudViewProj16, sizeof(mVrHudVP));
+    }
+    if (full2DViewProj16 != nullptr) {
+        memcpy(mVrFull2D, full2DViewProj16, sizeof(mVrFull2D));
     }
     mVrEyeActive = true;
     RenderVrTarget(commands, mtxReplacements, eyeWidth, eyeHeight, skyDome);

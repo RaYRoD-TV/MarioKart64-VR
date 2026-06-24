@@ -23,6 +23,7 @@ extern void  CVarSetFloat(const char* name, float value);
 extern int   CVarGetInteger(const char* name, int defaultValue);
 extern void  CVarSetInteger(const char* name, int value);
 extern bool  vr_is_active(void);
+extern bool  vr_fp_switch_locked(void); // pre-race: block switching INTO First Person (skip it in the cycle)
 
 // Stock pause-menu game actions + the unpause sequence (see the pause recon).
 extern void func_8028DF38(void); // restore saved controller state (must run on unpause)
@@ -189,7 +190,7 @@ static void reset_defaults(void) {
     }
     CVarSetFloat("gVRStereo", 0.5f);
     CVarSetFloat("gVRMenuOpacity", 0.5f);
-    CVarSetFloat("gVRHudDist", 2.4f);
+    CVarSetFloat("gVRHudDist", 2.90f);
     CVarSetInteger("gVRHideHud", 0);
     CVarSetInteger("gVRHudWorldLock", 1); // HUD world-locked by default
     CVarSetInteger("gVRFlipCam", 0);
@@ -205,8 +206,11 @@ static void row_change(s32 dir) {
                 m = (m + (dir == 0 ? 1 : dir) + 3) % 3; // Third / First / Diorama
                 CVarSetInteger("gFlatViewMode", m);
             } else {
-                s32 m = CVarGetInteger("gVRViewMode", 0);
-                m = (m + (dir == 0 ? 1 : dir) + 4) & 3; // A or right -> next, left -> prev
+                s32 step = (dir == 0 ? 1 : dir);
+                s32 m = (CVarGetInteger("gVRViewMode", 0) + step + 4) & 3; // A or right -> next, left -> prev
+                if (m == 1 /* First Person */ && vr_fp_switch_locked()) {
+                    m = (m + step + 4) & 3; // pre-race: can't switch INTO First Person; skip over it
+                }
                 CVarSetInteger("gVRViewMode", m);
             }
             break;
@@ -223,7 +227,7 @@ static void row_change(s32 dir) {
         }
         case ROW_STEREO:   if (dir != 0) clampf_cvar("gVRStereo",      0.5f, 0.0f, 1.5f, 0.05f, dir); break;
         case ROW_OPACITY:  if (dir != 0) clampf_cvar("gVRMenuOpacity", 0.5f, 0.3f, 1.0f, 0.05f, dir); break;
-        case ROW_HUDDIST:  if (dir != 0) clampf_cvar("gVRHudDist",     2.4f, 0.5f, 15.0f, 0.5f, dir); break;
+        case ROW_HUDDIST:  if (dir != 0) clampf_cvar("gVRHudDist",     2.90f, 0.5f, 15.0f, 0.5f, dir); break;
         case ROW_HUDHIDE:  CVarSetInteger("gVRHideHud", !CVarGetInteger("gVRHideHud", 0)); break;
         case ROW_HUDLOCK:  CVarSetInteger("gVRHudWorldLock", !CVarGetInteger("gVRHudWorldLock", 1)); break;
         case ROW_FLIPCAM:  CVarSetInteger("gVRFPDrama", !CVarGetInteger("gVRFPDrama", 1)); break;
@@ -298,7 +302,7 @@ static void value_string(s32 row, char* out) {
         }
         case ROW_STEREO:   sprintf(out, "%.2f", CVarGetFloat("gVRStereo", 0.5f)); break;
         case ROW_OPACITY:  sprintf(out, "%.2f", CVarGetFloat("gVRMenuOpacity", 0.5f)); break;
-        case ROW_HUDDIST:  sprintf(out, "%.2f", CVarGetFloat("gVRHudDist", 2.4f)); break;
+        case ROW_HUDDIST:  sprintf(out, "%.2f", CVarGetFloat("gVRHudDist", 2.90f)); break;
         case ROW_HUDHIDE:  sprintf(out, "%s", CVarGetInteger("gVRHideHud", 0) ? "ON" : "OFF"); break;
         case ROW_HUDLOCK:  sprintf(out, "%s", CVarGetInteger("gVRHudWorldLock", 1) ? "WORLD" : "HEAD"); break;
         case ROW_FLIPCAM:  sprintf(out, "%s", CVarGetInteger("gVRFPDrama", 1) ? "ON" : "OFF"); break;

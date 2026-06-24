@@ -6838,22 +6838,25 @@ extern void  CVarSetFloat(const char* name, float value);
 extern int   CVarGetInteger(const char* name, int defaultValue);
 extern void  CVarSetInteger(const char* name, int value);
 extern int   vr_pause_menu_is_open(void);
+extern bool  vr_fp_switch_locked(void);
 
 void func_80019C50(s32 arg0) {
     // VR: D-pad UP cycles ALL view modes (Third->First->Theater->Diorama->repeat) during a live race, when our
     // pause overlay isn't open. Scope the WHOLE block to the local camera (arg0==0): this fn runs once per
     // camera per frame, and a non-local camera's call (D-pad not held there) was resetting the shared static
     // every frame, which re-cycled the mode every frame while held -> the "fighting/jank". Held + static
-    // edge-detect = exactly one cycle per fresh press. Locked until the race has STARTED (gRaceState >=
-    // RACE_IN_PROGRESS - pre-race init/staging/countdown blocked, racing AND post-finish allowed) so the
-    // view mode can't change mid Lakitu start transition, and SILENT - changing the VR view shouldn't
-    // play a sound.
+    // edge-detect = exactly one cycle per fresh press. SILENT - changing the VR view shouldn't play a sound.
+    // Cycling is allowed during the pre-race course-open intro too, EXCEPT entering First Person: if FP wasn't
+    // the mode at race start it can't be switched into until GO (vr_fp_switch_locked) - so skip over it. Other
+    // modes switch freely the whole time.
     if (arg0 == 0) {
         static bool sDpadUpHeld = false;
         bool up = vr_is_active() && gIsGamePaused == 0 && !vr_pause_menu_is_open() &&
-                  gRaceState >= RACE_IN_PROGRESS && (gControllers[0].button & U_JPAD);
+                  (gControllers[0].button & U_JPAD);
         if (up && !sDpadUpHeld) {
-            CVarSetInteger("gVRViewMode", (CVarGetInteger("gVRViewMode", 0) + 1) & 3);
+            s32 m = (CVarGetInteger("gVRViewMode", 0) + 1) & 3;
+            if (m == 1 /* First Person */ && vr_fp_switch_locked()) { m = (m + 1) & 3; } // skip FP pre-race
+            CVarSetInteger("gVRViewMode", m);
         }
         sDpadUpHeld = up;
     }

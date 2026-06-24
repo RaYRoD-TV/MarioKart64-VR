@@ -488,6 +488,7 @@ void GameEngine::StartFrame() const {
 
 #if defined(ENABLE_VR) && defined(_WIN32)
 extern "C" int gGamestate;             // src/main.c; RACING == 4 (defines.h). Else == non-gameplay screen.
+extern "C" int gRaceState;             // src/main.c; RACE_STAGING == 2, RACE_IN_PROGRESS == 3 (defines.h).
 extern "C" unsigned short gIsGamePaused; // src/code_800029B0.h; nonzero == paused (pause menu over a frozen race)
 // VR sky dome (src/engine/sky/SkyDomeVR.cpp): a gradient sphere drawn at infinity so the sky anchors to head
 // yaw + pitch. Rebuilt once per game frame; passed to RunVrEye with vr_sky_viewproj.
@@ -691,7 +692,7 @@ void GameEngine::RunCommands(Gfx* pool, const std::vector<std::unordered_map<Mtx
                     const int eyes = vr_eye_count();
                     for (int e = 0; e < eyes; e++) {
                         interpreter->RunVrEye(pool, mtx, vr_eye_viewproj(e), vr_sky_viewproj(e),
-                                              vr_hud_viewproj(e), gVrSkyDomeGfx,
+                                              vr_hud_viewproj(e), vr_full2d_viewproj(e), gVrSkyDomeGfx,
                                               vr_eye_width(e), vr_eye_height(e));
                         vr_submit_eye_texture(e, interpreter->GetVrFbTextureId(), vr_eye_width(e), vr_eye_height(e));
                     }
@@ -713,7 +714,15 @@ void GameEngine::RunCommands(Gfx* pool, const std::vector<std::unordered_map<Mtx
             const bool gameplay = (gGamestate == 4 /* RACING */);
             // Stereo per-eye render for the in-world view modes (Third Person / First Person / Diorama).
             // Theater (and all non-gameplay screens) render the flat frame once onto the head-locked panel.
-            const bool stereo = gameplay && (vr_get_view_mode() != VR_VIEW_THEATER);
+            //
+            // The course-LOAD window (gRaceState < RACE_STAGING, ~0.8s while the track materializes) renders
+            // the flat panel instead of stereo. While the game is mid-load it can't present clean stereo - a
+            // frozen frame gets reprojected by the runtime -> the brief cross-eye at course open that no
+            // stereo-side fix could remove. The 3-2-1 countdown (RACE_STAGING) and the race are FULL stereo;
+            // only the raw load is flat. (2D overlays within stereo are already head-locked so they don't
+            // double - see the interpreter.)
+            const bool stereo = gameplay && (vr_get_view_mode() != VR_VIEW_THEATER)
+                                && (gRaceState >= 2 /* RACE_STAGING (include/defines.h) */);
             for (size_t s = 0; s < steps; s++) {
                 const auto& mtx = mtx_replacements.empty() ? kEmptyMtx : mtx_replacements[s];
                 vr_begin_frame();
@@ -722,7 +731,7 @@ void GameEngine::RunCommands(Gfx* pool, const std::vector<std::unordered_map<Mtx
                     const int eyes = vr_eye_count();
                     for (int e = 0; e < eyes; e++) {
                         interpreter->RunVrEye(pool, mtx, vr_eye_viewproj(e), vr_sky_viewproj(e),
-                                              vr_hud_viewproj(e), gVrSkyDomeGfx,
+                                              vr_hud_viewproj(e), vr_full2d_viewproj(e), gVrSkyDomeGfx,
                                               vr_eye_width(e), vr_eye_height(e));
                         vr_submit_eye_texture(e, interpreter->GetVrFbTextureId(), vr_eye_width(e), vr_eye_height(e));
                     }

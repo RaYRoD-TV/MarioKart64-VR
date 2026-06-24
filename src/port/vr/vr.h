@@ -114,6 +114,9 @@ void vr_submit(void);
 // VR view mode (Theater / Third Person / First Person / Diorama). See VrViewMode. Read from gVRViewMode each
 // frame; Engine routes Theater to the flat panel path, the others to the per-eye stereo path.
 int  vr_get_view_mode(void);     void vr_set_view_mode(int mode);
+// True while switching INTO First Person is blocked (pre-race course-open intro, unless FP was already the
+// mode at race start). The view-mode cycles skip First Person while this holds; other modes switch freely.
+bool vr_fp_switch_locked(void);
 // Game units to push the chase camera back (horizontal kart->camera direction) for the Third Person VR
 // distance knob. The game lookAt build adds this so distance reads as closer/further. 0 outside Third Person VR.
 float vr_third_person_push_units(void);
@@ -142,6 +145,10 @@ float vr_get_hud_dist(void);     void vr_set_hud_dist(float v);  // HUD plane di
 // Head-locked HUD view-projection for an eye (16 floats, row-vector). The renderer multiplies the game's
 // 2D ortho matrix by this for post-3D HUD draws so the HUD sits at a comfortable distance.
 const float* vr_hud_viewproj(int eye);
+// Full-FOV head-locked view-projection for an eye (16 floats, row-vector). The renderer multiplies a
+// screen-space 2D ortho matrix by this (pre-3D intro overlays / dome-less 2D sky) so that 2D fills the view
+// head-locked instead of being emitted raw - raw screen-space 2D doubles under the per-eye asymmetric submit.
+const float* vr_full2d_viewproj(int eye);
 
 void  vr_reset_defaults(void);
 

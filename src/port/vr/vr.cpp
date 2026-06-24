@@ -79,6 +79,8 @@ static uint32_t    sHudImgIdx      = 0;
 static bool        sHudReady       = false;
 static bool        sPanelMode      = false;
 static int         sEyesSubmitted  = 0; // eyes blitted into swapchains this frame (gates the proj layer)
+static int         sStereoRamp     = 0;  // eases eye separation in from flat when eye rendering resumes
+static const int   kStereoRampLen  = 45; // ~0.5-0.6s: lets the course-open chase cam settle before full depth
 static const int   sOverlayW = 1920;
 static const int   sOverlayH = 1080;
 
@@ -121,6 +123,11 @@ static float wrap_pi(float a) {
     return a;
 }
 extern "C" int gRaceState;                  // game race phase; == 2 (RACE_STAGING) during the start countdown.
+extern "C" int gGamestate;                  // RACING == 4 (defines.h); distinguishes being in a race vs a menu.
+// First Person lock: was First Person the live view mode when THIS race opened? Frozen at course-open (see
+// vr_begin_frame); while a race's pre-GO intro runs, FP can be ENTERED only if this is true. Gates the D-pad
+// and pause-menu view cycles via vr_fp_switch_locked().
+static bool sFpAllowedThisRace = true;
 static float sFirstPersonScale   = 20.0f;   // First Person world scale (units/m), its OWN knob (like Diorama)
                                             // so it doesn't shrink Third Person. Lower = bigger world.
 static float sFirstPersonEyeHeight = 0.0f;  // First Person eye height (m), its OWN knob (Third Person has its)
@@ -176,6 +183,7 @@ static float sPanelAnchorQy = 0.0f, sPanelAnchorQw = 1.0f;
 // render onto a view-space quad so it sits at a comfortable distance instead of at your face. Built per
 // eye from the symmetric fov; zero eye-offset -> zero disparity (relaxed, far-feeling), head-locked.
 static float sHudVP[2][4][4];
+static float sFull2DVP[2][4][4]; // full-FOV head-locked plane for screen-space 2D in the eye pass (anti-double)
 static float sHudScale = 0.35f; // fraction of the eye FOV the HUD fills (smaller = tighter, more central)
 // HUD LOCK = WORLD (gVRHudWorldLock): yaw-pin the in-race HUD plane to the room direction it was facing
 // when enabled, so you can turn your head and look AROUND it instead of it being glued dead-centre. It
@@ -183,13 +191,16 @@ static float sHudScale = 0.35f; // fraction of the eye FOV the HUD fills (smalle
 static float sHudYawAnchor   = 0.0f;   // room yaw the HUD is pinned to (captured on enable)
 static bool  sHudYawAnchored = false;
 static float sHudYawOffset   = 0.0f;   // yaw applied to the HUD plane this frame (0 = head-locked)
-static float sHudDistM = 2.4f;  // HUD plane distance (meters); pushed back so the wide course-name banner
+static float sHudDistM = 2.90f; // HUD plane distance (meters); pushed back so the wide course-name banner
                                 // (shares this plane) isn't in your face. Live-tunable via gVRHudDist.
 
 static PFN_xrGetOpenGLGraphicsRequirementsKHR pfnGetGLReq = NULL;
 
 extern "C" const float* vr_hud_viewproj(int eye) {
     return (eye >= 0 && eye < 2) ? &sHudVP[eye][0][0] : NULL;
+}
+extern "C" const float* vr_full2d_viewproj(int eye) {
+    return (eye >= 0 && eye < 2) ? &sFull2DVP[eye][0][0] : NULL;
 }
 
 extern "C" bool vr_is_active(void) { return sRunning; }
@@ -325,10 +336,15 @@ static void vr_build_eye_matrix(int eye) {
         dcz = sHeadRest[2] + (cz - sHeadRest[2]) * sHeadScale;
     }
 
-    // Stereo comfort: keep the IPD offset (scaled by sStereoScale) around the damped center.
-    pose.position.x = dcx + (pose.position.x - cx) * sStereoScale;
-    pose.position.y = dcy + (pose.position.y - cy) * sStereoScale;
-    pose.position.z = dcz + (pose.position.z - cz) * sStereoScale;
+    // Stereo comfort: keep the IPD offset (scaled by sStereoScale) around the damped center. The ramp
+    // (sStereoRamp, driven in vr_begin_frame) eases separation in from flat for ~0.5s when eye rendering
+    // resumes at course-open, so the chase cam settling close to the karts can't briefly over-separate.
+    float stereoEase = (float)sStereoRamp / (float)kStereoRampLen;
+    if (stereoEase > 1.0f) stereoEase = 1.0f;
+    float effStereo = sStereoScale * stereoEase;
+    pose.position.x = dcx + (pose.position.x - cx) * effStereo;
+    pose.position.y = dcy + (pose.position.y - cy) * effStereo;
+    pose.position.z = dcz + (pose.position.z - cz) * effStereo;
     sRenderPose[eye] = pose;
 
     // A: scale camera-space game units into meters, plus per-mode framing. The game's chase-cam lookAt is
@@ -363,13 +379,17 @@ static void vr_build_eye_matrix(int eye) {
     float zn = 0.02f;
     float zf = worldHalfM * 3.0f + 5.0f;
 
-    // Symmetrize the fov so reducing eye separation scales all disparities proportionally and keeps
-    // infinity at zero disparity (otherwise near + far can't both fuse).
+    // Use the runtime's NATIVE per-eye FOV. Canted-display headsets (Quest 3 / Quest Pro) angle the two
+    // panels inward, and the OpenXR runtime reports a strongly ASYMMETRIC per-eye FOV to match. We used to
+    // force the FOV symmetric here; combined with the eye's (also canted) orientation, that points both
+    // eyes' frustum centers inward -> the images converge -> CROSS-EYED. It only surfaced on Meta Horizon
+    // Link's native runtime: SteamVR / Virtual Desktop hand the app a virtualized near-symmetric stereo
+    // config (the cant lives in their compositor), so the old symmetrize was a harmless no-op there but
+    // broke the native canted views. The stereo-comfort separation is applied to the eye POSITION above
+    // (IPD scaling), which is independent of FOV/orientation and correct on any display geometry; infinity
+    // still fuses because at infinity disparity comes from view direction (native fov + orientation), not
+    // position. mat_proj_fov() already builds a correct off-center frustum from an asymmetric FOV.
     XrFovf fov = sViews[eye].fov;
-    float aH = fmaxf(fabsf(fov.angleLeft), fabsf(fov.angleRight));
-    float aV = fmaxf(fabsf(fov.angleUp),   fabsf(fov.angleDown));
-    fov.angleLeft = -aH; fov.angleRight = aH;
-    fov.angleDown = -aV; fov.angleUp = aV;
     sRenderFov[eye] = fov;
 
     float V[4][4], P[4][4], AV[4][4];
@@ -412,17 +432,14 @@ static void vr_build_eye_matrix(int eye) {
     // sHudDistM, sized by sHudScale, projected by the same eye fov. No eye offset -> head-locked, zero
     // disparity. The renderer multiplies the game's ortho matrix by this for post-3D 2D (HUD) draws.
     {
-        // Use a SHARED symmetric fov across BOTH eyes so sHudVP is identical per eye -> the head-locked
-        // HUD has no inter-eye disparity (no cross-eye). (Per-eye fov differs slightly; using it here
-        // made the UI a touch cross-eyed.)
+        // shAH/shAV: the widest half-angle across both eyes, used ONLY to size the HUD quad in view space
+        // (identical per eye -> no size disparity). The HUD is then PROJECTED with each eye's native fov
+        // below - see the note there.
         float shAH = 0.0f, shAV = 0.0f;
         for (int k = 0; k < 2; k++) {
             shAH = fmaxf(shAH, fmaxf(fabsf(sViews[k].fov.angleLeft), fabsf(sViews[k].fov.angleRight)));
             shAV = fmaxf(shAV, fmaxf(fabsf(sViews[k].fov.angleUp),   fabsf(sViews[k].fov.angleDown)));
         }
-        XrFovf hudFov;
-        hudFov.angleLeft = -shAH; hudFov.angleRight = shAH;
-        hudFov.angleDown = -shAV; hudFov.angleUp = shAV;
         float D  = (sHudDistM > 0.05f) ? sHudDistM : 2.0f;
         // Size the quad at a FIXED reference distance (not the live D) so changing HUD DISTANCE actually
         // makes the HUD recede and shrink, instead of the plane scaling with distance and looking
@@ -451,8 +468,15 @@ static void vr_build_eye_matrix(int eye) {
                 sHudYawOffset = 0.0f;
             }
         }
+        // Project the HUD with the SAME native per-eye fov the eye image is declared with (sRenderFov[eye]).
+        // The HUD is baked INTO the eye swapchain image, which the compositor reprojects using sRenderFov;
+        // drawing it with a different (forced-symmetric) fov than the image is declared with shifts the HUD
+        // oppositely per eye on canted-display headsets (Quest 3 / Pro) -> doubled / cross-eyed HUD. Matching
+        // the image's native fov makes the projection's off-center term and the compositor's un-projection
+        // cancel, so the quad lands head-locked at the same view direction in both eyes (was symmetric back
+        // when the eye image itself was submitted symmetric).
         float Phud[4][4];
-        mat_proj_fov(Phud, hudFov, 0.05f, 100.0f);
+        mat_proj_fov(Phud, sRenderFov[eye], 0.05f, 100.0f);
         if (sHudYawOffset != 0.0f) {
             float Ry[4][4], Myaw[4][4];
             mat_rot_y(Ry, sHudYawOffset);
@@ -461,6 +485,27 @@ static void vr_build_eye_matrix(int eye) {
         } else {
             mat_mul(sHudVP[eye], M, Phud);
         }
+    }
+
+    // Full-FOV head-locked plane for SCREEN-SPACE 2D drawn during the eye pass (course-open intro overlays,
+    // and the 2D sky on tracks without the VR dome). Such 2D is otherwise emitted raw (plain ortho), identical
+    // in both eyes, and then the per-eye ASYMMETRIC submission fov shoves the two copies apart -> double
+    // vision. Mapping it through this plane instead places it head-locked, FILLING the FOV, with NO inter-eye
+    // disparity (both eyes recover the same view direction), so it can't double - while the 3D world keeps its
+    // real per-eye stereo. Same construction as the HUD plane, but full-size and not yaw-locked.
+    {
+        float shAH = fmaxf(fmaxf(fabsf(sViews[0].fov.angleLeft), fabsf(sViews[0].fov.angleRight)),
+                           fmaxf(fabsf(sViews[1].fov.angleLeft), fabsf(sViews[1].fov.angleRight)));
+        float shAV = fmaxf(fmaxf(fabsf(sViews[0].fov.angleUp),   fabsf(sViews[0].fov.angleDown)),
+                           fmaxf(fabsf(sViews[1].fov.angleUp),   fabsf(sViews[1].fov.angleDown)));
+        float D = 2.0f;
+        float hw = D * tanf(shAH);   // quad fills the full (symmetric) FOV at distance D -> covers the view
+        float hh = D * tanf(shAV);
+        float M2[4][4] = { { 0 } };
+        M2[0][0] = hw; M2[1][1] = hh; M2[2][2] = 0.0f; M2[3][2] = -D; M2[3][3] = 1.0f;
+        float P2[4][4];
+        mat_proj_fov(P2, sRenderFov[eye], 0.05f, 100.0f);
+        mat_mul(sFull2DVP[eye], M2, P2);
     }
 }
 
@@ -1114,6 +1159,10 @@ extern "C" void  vr_set_hud_dist(float v)   { sHudDistM = (v < 0.3f) ? 0.3f : (v
 // Read the live CVar (not the cached sViewMode) so Engine's per-frame stereo/Theater gate matches the
 // eye-matrix build on the SAME frame - avoids a one-frame mismatched render when switching modes. Clamped.
 extern "C" int   vr_get_view_mode(void)     { int m = CVarGetInteger("gVRViewMode", sViewMode); return (m < 0) ? 0 : (m > 3 ? 3 : m); }
+// True while switching INTO First Person must be blocked: during a race's pre-GO course-open intro, unless FP
+// was already the mode when the race opened. Other view modes switch freely; this only blocks ENTERING FP.
+// The D-pad and pause-menu view cycles call this and skip over First Person while it returns true.
+extern "C" bool  vr_fp_switch_locked(void)  { return sRunning && gGamestate == 4 && gRaceState < 3 && !sFpAllowedThisRace; }
 extern "C" void  vr_set_view_mode(int m)    { sViewMode = (m < 0) ? 0 : (m > 3 ? 3 : m); }
 // How far (GAME units) to push the chase camera back along the horizontal kart->camera direction in Third
 // Person VR. The game (GameCamera::SetViewProjection) moves the eye by this so distance reads as closer/
@@ -1164,6 +1213,12 @@ extern "C" void vr_begin_frame(void) {
     sMenuSize    = CVarGetFloat("gVRMenuSize",    sMenuSize);
     sViewMode           = CVarGetInteger("gVRViewMode",      sViewMode);
     if (sViewMode < 0) sViewMode = 0; else if (sViewMode > 3) sViewMode = 3;
+    // First Person lock latch: outside a race's pre-GO intro, track whether FP is the live mode; the moment a
+    // race opens (gGamestate==4 with the race not yet started) this FREEZES, so FP can be entered during the
+    // course-open intro only if it was already the mode at race start. See vr_fp_switch_locked().
+    if (!(gGamestate == 4 && gRaceState < 3)) {
+        sFpAllowedThisRace = (sViewMode == VR_VIEW_FIRST_PERSON);
+    }
     sFirstPersonForward   = CVarGetFloat("gVRFirstPersonFwd",       sFirstPersonForward);
     // First Person sits AT the driver's seat from the very first frame - pre-race included. (An
     // earlier cut held the push at 0 through the countdown so Lakitu's start light stayed in
@@ -1175,8 +1230,16 @@ extern "C" void vr_begin_frame(void) {
         sFlipCamOn = CVarGetInteger("gVRFlipCam", 0);
         sFPDramaOn = CVarGetInteger("gVRFPDrama", 1);
         float fpTarget = !vr_action_cam_pullback() ? sFirstPersonForward : 0.0f;
-        if (fpTarget < sFPForwardCur) { sFPForwardCur += (fpTarget - sFPForwardCur) * 0.35f; } // quick ease out
-        else { sFPForwardCur += (fpTarget - sFPForwardCur) * 0.12f; }                          // gentle ease back
+        // While eyes aren't rendering (menus, loading, between races) PARK the push at its target so a race
+        // opens with the eye already at the driver's seat on frame 1 - the documented intent above. Without
+        // this the post-race pullback leaves sFPForwardCur near 0 and it SWEEPS forward (~1s) at the next
+        // race start; that forward sweep is the "screen enlarging", and the headset reprojecting that fast
+        // app-driven motion produced the doubled / cross-eyed image for a second or two. (It was never a
+        // stereo bug - the per-frame diag showed sep=0, i.e. flat stereo, throughout.) The eases below still
+        // run in-race so the action-cam pullback (drama / finish) and its recovery stay smooth.
+        if (sEyesSubmitted < 2) { sFPForwardCur = fpTarget; }            // parked (no eyes last frame): snap
+        else if (fpTarget < sFPForwardCur) { sFPForwardCur += (fpTarget - sFPForwardCur) * 0.35f; } // ease out
+        else { sFPForwardCur += (fpTarget - sFPForwardCur) * 0.12f; }                                // ease back
 
         // Smooth the First Person drama rotation at the headset rate. The game's spin/tumble angles
         // step once per 30Hz logic tick; chasing them on the shortest angular path here turns the
@@ -1199,6 +1262,13 @@ extern "C" void vr_begin_frame(void) {
     sDioramaDist        = CVarGetFloat("gVRDioramaDist",      sDioramaDist);
     sDioramaHeight      = CVarGetFloat("gVRDioramaHeight",    sDioramaHeight);
     sMenuOpacity        = CVarGetFloat("gVRMenuOpacity",      sMenuOpacity);
+
+    // Stereo ease-in: sEyesSubmitted still holds the PREVIOUS frame's eye count here (reset below). If the
+    // last frame didn't render both eyes (menu/panel, course load, mode switch), restart the ramp so the
+    // separation comes back from FLAT - at course-open the chase cam can sit close to the karts for ~0.5s
+    // before settling, which would briefly over-separate near content into a cross-eye. Flat->full in ~0.5s.
+    if (sEyesSubmitted >= 2) { if (sStereoRamp < kStereoRampLen) sStereoRamp++; }
+    else                     { sStereoRamp = 0; }
 
     sViewsValid = false;
     sPoseTracked = false;
